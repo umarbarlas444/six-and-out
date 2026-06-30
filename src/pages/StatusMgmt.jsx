@@ -49,7 +49,7 @@ export default function StatusMgmt() {
       if (dialog === 'new') {
         await createStatus({ ...form, label: form.label.trim(), sort_order: statuses.length })
       } else {
-        await updateStatus(dialog.id, { ...form, label: form.label.trim() }, dialog)
+        await updateStatus(dialog.id, { ...form, label: form.label.trim() })
       }
       await refreshStatuses()
       closeDialog()
@@ -63,7 +63,7 @@ export default function StatusMgmt() {
   const remove = async () => {
     setDeleteError('')
     try {
-      await deleteStatus(deleteTarget.id, deleteTarget)
+      await deleteStatus(deleteTarget.id)
       await refreshStatuses()
       setDeleteTarget(null)
     } catch (err) {

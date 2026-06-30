@@ -1,7 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useApp } from '@/context/AppContext.jsx'
-import { getBookingsByDay, updateBooking, deleteBooking, getBookingById } from '@/db.js'
-import { formatDate, formatTime, calcDuration, addDays, formatDateInput } from '@/utils.js'
+import { getBookingsByDay, updateBooking, deleteBooking } from '@/db.js'
+import { formatDate, formatTime, addDays, formatDateInput } from '@/utils.js'
+
+function fmtHours(start, end) {
+  const hrs = (new Date(end) - new Date(start)) / 3600000
+  return Number.isInteger(hrs) ? `${hrs}h` : `${hrs}h`
+}
 import StatusBadge from '@/components/StatusBadge.jsx'
 import CalendarView from '@/components/CalendarView.jsx'
 import { Button } from '@/components/ui/button'
@@ -22,13 +27,14 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   ChevronLeft, ChevronRight, Plus, MoreHorizontal,
-  Pencil, Trash2, CalendarDays, ArrowUpDown, LayoutList, CalendarRange,
+  Pencil, Trash2, CalendarDays, ArrowUpDown, LayoutList, CalendarRange, RefreshCw,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export default function Home({ onAdd, onEdit, refreshKey }) {
-  const { statuses, refreshPending } = useApp()
-  const [view, setView] = useState('table')
+  const { statuses } = useApp()
+  const [view, setView] = useState('calendar')
+  const [calRefreshKey, setCalRefreshKey] = useState(0)
   const [date, setDate] = useState(formatDateInput(new Date()))
   const [bookings, setBookings] = useState([])
   const [nameFilter, setNameFilter] = useState('')
@@ -44,16 +50,12 @@ export default function Home({ onAdd, onEdit, refreshKey }) {
   useEffect(() => { load() }, [load, refreshKey])
 
   const handleStatusChange = async (id, statusId) => {
-    const old = await getBookingById(id)
-    await updateBooking(id, { status: statusId }, old)
-    await refreshPending()
+    await updateBooking(id, { status: statusId })
     load()
   }
 
   const handleDelete = async () => {
-    const old = await getBookingById(toDelete.id)
-    await deleteBooking(toDelete.id, old)
-    await refreshPending()
+    await deleteBooking(toDelete.id)
     load()
     setToDelete(null)
   }
@@ -103,23 +105,33 @@ export default function Home({ onAdd, onEdit, refreshKey }) {
 
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-        {/* View toggle */}
-        <div className="flex items-center rounded-md border self-start">
+        {/* View toggle + refresh */}
+        <div className="flex items-center gap-2 self-start w-full sm:w-auto">
+          <div className="flex items-center rounded-md border">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn('h-9 rounded-r-none border-r gap-1.5', view === 'table' && 'bg-accent text-accent-foreground')}
+              onClick={() => setView('table')}
+            >
+              <LayoutList className="h-4 w-4" /> Table
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn('h-9 rounded-l-none gap-1.5', view === 'calendar' && 'bg-accent text-accent-foreground')}
+              onClick={() => setView('calendar')}
+            >
+              <CalendarRange className="h-4 w-4" /> Calendar
+            </Button>
+          </div>
           <Button
-            variant="ghost"
-            size="sm"
-            className={cn('h-9 rounded-r-none border-r gap-1.5', view === 'table' && 'bg-accent text-accent-foreground')}
-            onClick={() => setView('table')}
+            variant="outline"
+            size="icon"
+            className="h-9 w-9 ml-auto sm:ml-0 shrink-0"
+            onClick={() => { load(); setCalRefreshKey((k) => k + 1) }}
           >
-            <LayoutList className="h-4 w-4" /> Table
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn('h-9 rounded-l-none gap-1.5', view === 'calendar' && 'bg-accent text-accent-foreground')}
-            onClick={() => setView('calendar')}
-          >
-            <CalendarRange className="h-4 w-4" /> Calendar
+            <RefreshCw className="h-4 w-4" />
           </Button>
         </div>
 
@@ -160,17 +172,17 @@ export default function Home({ onAdd, onEdit, refreshKey }) {
         )}
 
         {/* Filters + add */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:ml-auto">
+        <div className="flex flex-row flex-wrap gap-2 sm:ml-auto">
           {view === 'table' && (
             <>
               <Input
                 placeholder="Search by name…"
                 value={nameFilter}
                 onChange={(e) => setNameFilter(e.target.value)}
-                className="h-9 sm:w-44"
+                className="h-9 w-auto flex-1 sm:w-44 sm:flex-none"
               />
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="h-9 sm:w-40">
+                <SelectTrigger className="h-9 w-auto flex-1 sm:w-40 sm:flex-none">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -182,7 +194,7 @@ export default function Home({ onAdd, onEdit, refreshKey }) {
               </Select>
             </>
           )}
-          <Button size="sm" className="h-9 gap-1.5" onClick={() => onAdd()}>
+          <Button size="sm" className="h-9 gap-1.5" onClick={() => onAdd({ date_start: `${date}T08:00` })}>
             <Plus className="h-4 w-4" />
             New booking
           </Button>
@@ -191,7 +203,7 @@ export default function Home({ onAdd, onEdit, refreshKey }) {
 
       {/* Calendar view */}
       {view === 'calendar' && (
-        <CalendarView onEdit={onEdit} onAdd={onAdd} refreshKey={refreshKey} />
+        <CalendarView onEdit={onEdit} onAdd={onAdd} refreshKey={refreshKey + calRefreshKey} />
       )}
 
       {/* Table — horizontally scrollable on mobile */}
@@ -204,7 +216,6 @@ export default function Home({ onAdd, onEdit, refreshKey }) {
                 <SortableHead col="customer_name" className="min-w-[140px]">Customer</SortableHead>
                 <TableHead className="min-w-[120px]">Phone</TableHead>
                 <SortableHead col="date_start" className="min-w-[90px]">Start</SortableHead>
-                <SortableHead col="date_end" className="min-w-[80px]">End</SortableHead>
                 <TableHead className="min-w-[80px]">Duration</TableHead>
                 <SortableHead col="status" className="min-w-[130px]">Status</SortableHead>
                 <TableHead className="min-w-[110px]">Advance</TableHead>
@@ -215,7 +226,7 @@ export default function Home({ onAdd, onEdit, refreshKey }) {
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="h-48 text-center">
+                  <TableCell colSpan={9} className="h-48 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <CalendarDays className="h-8 w-8 text-muted-foreground/30" />
                       <p className="text-sm text-muted-foreground">
@@ -249,8 +260,7 @@ export default function Home({ onAdd, onEdit, refreshKey }) {
                     ) : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="tabular-nums text-sm whitespace-nowrap">{formatTime(b.date_start)}</TableCell>
-                  <TableCell className="tabular-nums text-sm whitespace-nowrap">{formatTime(b.date_end)}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{calcDuration(b.date_start, b.date_end)}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{fmtHours(b.date_start, b.date_end)}</TableCell>
                   <TableCell>
                     <Select value={b.status} onValueChange={(v) => handleStatusChange(b.id, v)}>
                       <SelectTrigger className="h-auto w-auto border-none bg-transparent p-0 shadow-none focus:ring-0 [&>svg]:hidden">

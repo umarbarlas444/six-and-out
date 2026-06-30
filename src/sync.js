@@ -1,4 +1,4 @@
-import { getSyncQueue, resolveSyncItem, failSyncItem, upsertBookingFromServer, upsertStatusFromServer } from './db.js'
+import { getSyncQueue, resolveSyncItem, failSyncItem, upsertBookingFromServer, upsertStatusFromServer, getBookingById, getStatusById } from './db.js'
 import { logAudit } from './audit.js'
 import { supabase } from './supabase.js'
 
@@ -7,7 +7,21 @@ async function pushItem(item) {
   const table = item.entity_type === 'booking' ? 'bookings' : 'statuses'
 
   if (item.operation === 'CREATE' || item.operation === 'UPDATE') {
-    const { error } = await supabase.from(table).upsert({ ...payload, id: item.entity_id }, { onConflict: 'id' })
+    // Fetch the current local record to fill any missing fields in the queued payload
+    const local = item.entity_type === 'booking'
+      ? await getBookingById(item.entity_id)
+      : await getStatusById(item.entity_id)
+
+    const now = new Date().toISOString()
+    const body = { ...local, ...payload, id: item.entity_id }
+
+    // Guarantee required fields are never null
+    if (!body.created_at) body.created_at = now
+    if (!body.updated_at) body.updated_at = now
+    if (body.is_default !== undefined) body.is_default = body.is_default ? 1 : 0
+    if (body.sort_order !== undefined) body.sort_order = Number(body.sort_order) || 0
+
+    const { error } = await supabase.from(table).upsert(body, { onConflict: 'id' })
     if (error) throw new Error(error.message)
     return true
   }
