@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '@/context/AppContext.jsx'
 import { createBooking, updateBooking, deleteBooking, getBookingById } from '@/db.js'
-import { toLocalDatetimeValue } from '@/utils.js'
+import { actualToBusinessValue, businessValueToActualDate } from '@/utils.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -127,7 +127,8 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
         setForm({
           customer_name: b.customer_name,
           phone: b.phone ?? '',
-          date_start: toLocalDatetimeValue(b.date_start),
+          // Show the business day the user thinks in, not the raw calendar date.
+          date_start: actualToBusinessValue(b.date_start),
           hours: hours !== '' ? String(hours) : '',
           status: b.status,
           notes: b.notes ?? '',
@@ -136,7 +137,11 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
         })
       })
     } else {
-      setForm({ ...empty, status: defaultStatus?.id ?? '', ...prefill })
+      // Prefills carry actual calendar datetimes (e.g. from a past-midnight
+      // calendar slot); present them as the corresponding business day.
+      const pf = { ...prefill }
+      if (pf.date_start) pf.date_start = actualToBusinessValue(pf.date_start)
+      setForm({ ...empty, status: defaultStatus?.id ?? '', ...pf })
     }
   }, [bookingId]) // eslint-disable-line
 
@@ -160,7 +165,9 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
     const hours = parseFloat(form.hours)
     if (!form.hours || isNaN(hours) || hours <= 0) return setError('Duration must be a positive number of hours.')
 
-    const dateStart = new Date(form.date_start)
+    // The picker holds a business day; convert to the actual calendar datetime
+    // (a start before 5 AM lands on the next calendar day) before storing.
+    const dateStart = businessValueToActualDate(form.date_start)
     const dateEnd = new Date(dateStart.getTime() + hours * 3600000)
 
     setSaving(true)
