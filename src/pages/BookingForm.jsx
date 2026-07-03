@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '@/context/AppContext.jsx'
-import { createBooking, updateBooking, deleteBooking, getBookingById } from '@/db.js'
-import { actualToBusinessValue, businessValueToActualDate } from '@/utils.js'
+import { createBooking, updateBooking, deleteBooking, getBookingById, searchOverlap } from '@/db.js'
+import { actualToBusinessValue, businessValueToActualDate, formatTime } from '@/utils.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,7 +19,7 @@ import {
   Popover, PopoverContent, PopoverTrigger,
 } from '@/components/ui/popover'
 import StatusBadge from '@/components/StatusBadge.jsx'
-import { AlertCircle, ChevronDown, Trash2 } from 'lucide-react'
+import { AlertCircle, AlertTriangle, ChevronDown, Trash2 } from 'lucide-react'
 
 const HOURS12 = ['12', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11']
 const MINUTES = ['00', '15', '30', '45']
@@ -115,6 +115,10 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
   const [form, setForm] = useState(empty)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  // Overlap check result: { hard: [...], soft: [...] }. `softAck` lets the user
+  // proceed past a soft-flag warning by submitting again ("Book anyway").
+  const [conflicts, setConflicts] = useState(null)
+  const [softAck, setSoftAck] = useState(false)
   const isEdit = Boolean(bookingId)
 
   useEffect(() => {
@@ -151,6 +155,9 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
 
   const field = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
+  // Any change to the time span invalidates a prior overlap check.
+  const clearConflicts = () => { setConflicts(null); setSoftAck(false) }
+
   const handleDelete = async () => {
     await deleteBooking(bookingId)
     onSaved?.()
@@ -172,6 +179,24 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
 
     setSaving(true)
     try {
+      // Prevent overbooking: check for existing bookings in this time slot.
+      // A hard-block conflict blocks the save outright; a soft-flag only warns
+      // and can be overridden by submitting again.
+      const overlapping = await searchOverlap(dateStart.toISOString(), dateEnd.toISOString())
+      const clashing = overlapping.filter((b) => b.id !== bookingId)
+      const hard = clashing.filter((b) => b.status_availability === 'hard_block')
+      const soft = clashing.filter((b) => b.status_availability === 'soft_flag')
+      if (hard.length > 0) {
+        setConflicts({ hard, soft })
+        return
+      }
+      if (soft.length > 0 && !softAck) {
+        setConflicts({ hard: [], soft })
+        setSoftAck(true)
+        return
+      }
+      setConflicts(null)
+
       const data = {
         customer_name: form.customer_name.trim(),
         phone: form.phone.trim(),
@@ -212,6 +237,23 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               {error}
             </div>
+          )}
+
+          {conflicts?.hard?.length > 0 && (
+            <ConflictNotice
+              variant="hard"
+              title="Time slot already booked"
+              message="A booking already occupies this slot. Change the time to continue."
+              bookings={conflicts.hard}
+            />
+          )}
+          {conflicts && conflicts.hard.length === 0 && conflicts.soft.length > 0 && (
+            <ConflictNotice
+              variant="soft"
+              title="This slot overlaps an existing booking"
+              message="Review the overlap below, then press “Book anyway” to proceed."
+              bookings={conflicts.soft}
+            />
           )}
 
           {/* Customer */}
@@ -287,7 +329,7 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
               </Label>
               <DateTimePicker
                 value={form.date_start}
-                onChange={(v) => setForm((f) => ({ ...f, date_start: v }))}
+                onChange={(v) => { setForm((f) => ({ ...f, date_start: v })); clearConflicts() }}
               />
             </div>
             <div className="space-y-1.5">
@@ -301,7 +343,7 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
                 step="0.5"
                 placeholder="e.g. 2 or 1.5"
                 value={form.hours}
-                onChange={field('hours')}
+                onChange={(e) => { field('hours')(e); clearConflicts() }}
               />
             </div>
           </div>
@@ -376,8 +418,12 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
             </Button>
           )}
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button type="submit" form="booking-form" disabled={saving}>
-            {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add booking'}
+          <Button type="submit" form="booking-form" disabled={saving || conflicts?.hard?.length > 0}>
+            {saving
+              ? 'Saving…'
+              : conflicts?.soft?.length > 0 && conflicts.hard.length === 0
+                ? 'Book anyway'
+                : isEdit ? 'Save changes' : 'Add booking'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -402,5 +448,35 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
         </AlertDialogContent>
       </AlertDialog>
     </Dialog>
+  )
+}
+
+function ConflictNotice({ variant, title, message, bookings }) {
+  const isHard = variant === 'hard'
+  const Icon = isHard ? AlertCircle : AlertTriangle
+  const tone = isHard
+    ? 'border-destructive/50 bg-destructive/10 text-destructive'
+    : 'border-yellow-500/40 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400'
+  return (
+    <div className={`space-y-2 rounded-md border px-3 py-2 text-sm ${tone}`}>
+      <div className="flex items-start gap-2 font-medium">
+        <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+        {title}
+      </div>
+      <p className="text-xs text-muted-foreground">{message}</p>
+      <ul className="space-y-1">
+        {bookings.map((b) => (
+          <li key={b.id} className="flex flex-wrap items-center gap-x-2 text-xs text-foreground">
+            <span className="font-medium">{b.customer_name}</span>
+            <span className="text-muted-foreground tabular-nums">
+              {formatTime(b.date_start)} – {formatTime(b.date_end)}
+            </span>
+            {b.status_label && (
+              <StatusBadge label={b.status_label} color={b.status_color} />
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
