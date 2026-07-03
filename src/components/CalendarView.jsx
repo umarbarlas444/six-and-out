@@ -4,6 +4,7 @@ import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import { getBookingsInRange } from '@/db.js'
+import { BUSINESS_DAY_START_HOUR } from '@/utils.js'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -13,6 +14,23 @@ const VIEWS = [
   { key: 'timeGrid3Day', label: '3 Days' },
   { key: 'timeGridDay', label: 'Day' },
 ]
+
+// The business day runs from 5 AM (BUSINESS_DAY_START_HOUR) until 5 AM the next
+// calendar day. A booking at e.g. Friday 1 AM belongs to Thursday's business day.
+//
+// Shift a booking that starts before the 5 AM cutoff back onto the previous
+// calendar day (keeping its clock time) so day-grid/month view groups it under
+// the correct business day. The same day-delta is applied to the end so events
+// spanning the cutoff stay intact.
+function toBusinessDay(startIso, endIso) {
+  const start = new Date(startIso)
+  const end = new Date(endIso)
+  if (start.getHours() < BUSINESS_DAY_START_HOUR) {
+    start.setDate(start.getDate() - 1)
+    end.setDate(end.getDate() - 1)
+  }
+  return { start, end }
+}
 
 function EventPill({ info }) {
   const { event } = info
@@ -38,18 +56,33 @@ export default function CalendarView({ onEdit, onAdd, refreshKey }) {
 
   const fetchEvents = useCallback(async (info, successCallback, failureCallback) => {
     try {
-      const bookings = await getBookingsInRange(info.start.toISOString(), info.end.toISOString())
+      // Widen the query end so early-morning bookings (up to the 5 AM cutoff)
+      // that belong to the last visible business day are still fetched.
+      const queryEnd = new Date(info.end)
+      queryEnd.setHours(queryEnd.getHours() + BUSINESS_DAY_START_HOUR)
+      const bookings = await getBookingsInRange(info.start.toISOString(), queryEnd.toISOString())
+
+      // Only month (day-grid) view needs the date shifted onto the business day.
+      // Time-grid views place events at their real time and rely on the extended
+      // slotMaxTime to render past-midnight bookings under the previous day.
+      const isMonthView = calendarRef.current?.getApi().view.type === 'dayGridMonth'
+
       successCallback(
-        bookings.map((b) => ({
-          id: b.id,
-          title: b.customer_name,
-          start: b.date_start,
-          end: b.date_end,
-          backgroundColor: b.status_color ?? '#6B7280',
-          borderColor: 'transparent',
-          textColor: '#ffffff',
-          extendedProps: { booking: b, color: b.status_color ?? '#6B7280' },
-        }))
+        bookings.map((b) => {
+          const shifted = isMonthView ? toBusinessDay(b.date_start, b.date_end) : null
+          const start = shifted ? shifted.start : b.date_start
+          const end = shifted ? shifted.end : b.date_end
+          return {
+            id: b.id,
+            title: b.customer_name,
+            start,
+            end,
+            backgroundColor: b.status_color ?? '#6B7280',
+            borderColor: 'transparent',
+            textColor: '#ffffff',
+            extendedProps: { booking: b, color: b.status_color ?? '#6B7280' },
+          }
+        })
       )
     } catch (err) {
       failureCallback(err)
@@ -61,8 +94,12 @@ export default function CalendarView({ onEdit, onAdd, refreshKey }) {
   }, [refreshKey])
 
   const switchView = (view) => {
-    calendarRef.current?.getApi().changeView(view)
+    const api = calendarRef.current?.getApi()
+    api?.changeView(view)
     setActiveView(view)
+    // Month vs time-grid views transform event dates differently (business-day
+    // shift), so force a refetch to recompute events for the new view.
+    api?.refetchEvents()
   }
 
   return (
@@ -129,17 +166,24 @@ export default function CalendarView({ onEdit, onAdd, refreshKey }) {
           initialView="dayGridMonth"
           headerToolbar={false}
           views={{ timeGrid3Day: { type: 'timeGrid', duration: { days: 3 }, buttonText: '3 Days' } }}
+          slotMinTime="05:00:00"
+          slotMaxTime="29:00:00"
+          nextDayThreshold="05:00:00"
           events={fetchEvents}
           eventClick={({ event }) => onEdit(event.id)}
           dateClick={({ date, view }) => {
             if (view.type === 'dayGridMonth' || view.type === 'timeGridWeek') {
-              calendarRef.current?.getApi().changeView('timeGridDay', date)
+              const api = calendarRef.current?.getApi()
+              api?.changeView('timeGridDay', date)
               setActiveView('timeGridDay')
+              api?.refetchEvents()
             } else {
-              const dateStr = date.toISOString().slice(0, 10)
-              const hour = date.getHours().toString().padStart(2, '0')
-              const min = date.getMinutes().toString().padStart(2, '0')
-              onAdd({ date_start: `${dateStr}T${hour}:${min}`, date_end: `${dateStr}T${hour}:${min}` })
+              // Build from local parts — toISOString() would convert to UTC and
+              // shift the day/hour, which is especially wrong for post-midnight slots.
+              const pad = (n) => n.toString().padStart(2, '0')
+              const dateStr = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+              const timeStr = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+              onAdd({ date_start: `${dateStr}T${timeStr}`, date_end: `${dateStr}T${timeStr}` })
             }
           }}
           height="auto"

@@ -13,6 +13,29 @@ export function toLocalDatetimeValue(isoString) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+// The business day runs from this hour until the same hour the next calendar
+// day. A booking that starts before this cutoff (e.g. 1 AM) belongs to the
+// PREVIOUS calendar day's business day.
+export const BUSINESS_DAY_START_HOUR = 5
+
+// storage (actual calendar datetime) -> the business day the user thinks in.
+// Only the calendar date is shifted; the clock time is unchanged.
+// e.g. actual Fri 1 AM -> business value "Thu …T01:00"
+export function actualToBusinessValue(isoString) {
+  if (!isoString) return ''
+  const d = new Date(isoString)
+  if (d.getHours() < BUSINESS_DAY_START_HOUR) d.setDate(d.getDate() - 1)
+  return toLocalDatetimeValue(d)
+}
+
+// business day the user picked -> actual calendar datetime for storage.
+// Inverse of actualToBusinessValue. e.g. picked Thu 1 AM -> actual Fri 1 AM.
+export function businessValueToActualDate(localValue) {
+  const d = new Date(localValue)
+  if (d.getHours() < BUSINESS_DAY_START_HOUR) d.setDate(d.getDate() + 1)
+  return d
+}
+
 export function formatTime(isoString) {
   if (!isoString) return ''
   return new Date(isoString).toLocaleTimeString('en-PK', {
