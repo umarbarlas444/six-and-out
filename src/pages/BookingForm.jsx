@@ -19,6 +19,7 @@ import {
   Popover, PopoverContent, PopoverTrigger,
 } from '@/components/ui/popover'
 import StatusBadge from '@/components/StatusBadge.jsx'
+import CounterInput from '@/components/CounterInput.jsx'
 import { AlertCircle, AlertTriangle, ChevronDown, Trash2 } from 'lucide-react'
 
 const HOURS12 = ['12', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11']
@@ -107,6 +108,7 @@ function DateTimePicker({ value, onChange }) {
 const empty = {
   customer_name: '', phone: '', date_start: '', hours: '',
   status: '', notes: '', advance_paid: '', total_amount: '',
+  balls_new: '', balls_old: '', tapes: '',
 }
 
 export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
@@ -138,6 +140,9 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
           notes: b.notes ?? '',
           advance_paid: b.advance_paid ?? '',
           total_amount: b.total_amount ?? '',
+          balls_new: b.balls_new || '',
+          balls_old: b.balls_old || '',
+          tapes: b.tapes || '',
         })
       })
     } else {
@@ -154,6 +159,7 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
   const selectedStatus = statuses.find((s) => s.id === form.status)
 
   const field = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
+  const setCount = (key) => (v) => setForm((f) => ({ ...f, [key]: v }))
 
   // Any change to the time span invalidates a prior overlap check.
   const clearConflicts = () => { setConflicts(null); setSoftAck(false) }
@@ -206,6 +212,9 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
         notes: form.notes.trim(),
         advance_paid: parseFloat(form.advance_paid) || 0,
         total_amount: parseFloat(form.total_amount) || 0,
+        balls_new: parseInt(form.balls_new, 10) || 0,
+        balls_old: parseInt(form.balls_old, 10) || 0,
+        tapes: parseInt(form.tapes, 10) || 0,
       }
       if (isEdit) {
         await updateBooking(bookingId, data)
@@ -390,6 +399,18 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
               </div>
             )
           })()}
+
+          <Separator />
+
+          {/* Equipment given out for this booking */}
+          <div className="space-y-3">
+            <p className="text-sm font-medium">Equipment used</p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <CounterInput id="balls_new" label="New balls" value={form.balls_new} onChange={setCount('balls_new')} />
+              <CounterInput id="balls_old" label="Old balls" value={form.balls_old} onChange={setCount('balls_old')} />
+              <CounterInput id="tapes" label="Tapes" value={form.tapes} onChange={setCount('tapes')} />
+            </div>
+          </div>
 
           {/* Notes */}
           <div className="space-y-1.5">

@@ -17,8 +17,14 @@ import {
 } from '@/components/ui/popover'
 import {
   Sun, Moon, Monitor, Search,
-  LayoutDashboard, Tags, MoreVertical, Download, Share,
+  LayoutDashboard, CalendarRange, Settings, MoreVertical, Download, Share,
 } from 'lucide-react'
+
+const NAV_ITEMS = [
+  { key: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
+  { key: 'calendar', label: 'Calendar', Icon: CalendarRange },
+  { key: 'settings', label: 'Settings', Icon: Settings },
+]
 
 export default function Header({ screen, onNavigate, onSearch }) {
   const { theme, setTheme } = useTheme()
@@ -71,24 +77,18 @@ export default function Header({ screen, onNavigate, onSearch }) {
         {/* Desktop nav */}
         <Separator orientation="vertical" className="h-5 mx-1 hidden sm:block" />
         <nav className="hidden sm:flex items-center gap-1">
-          <Button
-            variant={screen === 'home' ? 'secondary' : 'ghost'}
-            size="sm"
-            className="gap-2"
-            onClick={() => onNavigate('home')}
-          >
-            <LayoutDashboard className="h-4 w-4" />
-            Dashboard
-          </Button>
-          <Button
-            variant={screen === 'settings' ? 'secondary' : 'ghost'}
-            size="sm"
-            className="gap-2"
-            onClick={() => onNavigate('settings')}
-          >
-            <Tags className="h-4 w-4" />
-            Statuses
-          </Button>
+          {NAV_ITEMS.map(({ key, label, Icon }) => (
+            <Button
+              key={key}
+              variant={screen === key ? 'secondary' : 'ghost'}
+              size="sm"
+              className="gap-2"
+              onClick={() => onNavigate(key)}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </Button>
+          ))}
         </nav>
 
         <div className="ml-auto flex items-center gap-1.5">
@@ -132,12 +132,11 @@ export default function Header({ screen, onNavigate, onSearch }) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => onNavigate('home')}>
-                <LayoutDashboard className="mr-2 h-4 w-4" /> Dashboard
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onNavigate('settings')}>
-                <Tags className="mr-2 h-4 w-4" /> Statuses
-              </DropdownMenuItem>
+              {NAV_ITEMS.map(({ key, label, Icon }) => (
+                <DropdownMenuItem key={key} onClick={() => onNavigate(key)}>
+                  <Icon className="mr-2 h-4 w-4" /> {label}
+                </DropdownMenuItem>
+              ))}
               {showInstall && <DropdownMenuSeparator />}
               {showInstall && canInstall && (
                 <DropdownMenuItem onClick={install}>

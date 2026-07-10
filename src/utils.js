@@ -61,6 +61,29 @@ export function formatDateInput(date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
+// Bounds of the business day containing dateStr ('YYYY-MM-DD'): 5 AM local on
+// that date until 5 AM the next calendar day.
+export function getBusinessDayBounds(dateStr) {
+  const start = new Date(dateStr)
+  start.setHours(BUSINESS_DAY_START_HOUR, 0, 0, 0)
+  const end = new Date(start)
+  end.setDate(end.getDate() + 1)
+  return { start: start.toISOString(), end: end.toISOString() }
+}
+
+// 'YYYY-MM-DD' of the business day a datetime belongs to — a time before the
+// 5 AM cutoff counts as the previous calendar day.
+export function businessDayKey(isoString) {
+  const d = new Date(isoString)
+  if (d.getHours() < BUSINESS_DAY_START_HOUR) d.setDate(d.getDate() - 1)
+  return formatDateInput(d)
+}
+
+// The business day "today" falls in, as 'YYYY-MM-DD'.
+export function todayBusinessDay() {
+  return businessDayKey(new Date().toISOString())
+}
+
 export function getDayBounds(dateStr) {
   const start = new Date(dateStr)
   start.setHours(0, 0, 0, 0)
