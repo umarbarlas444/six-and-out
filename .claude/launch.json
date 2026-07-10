@@ -4,8 +4,8 @@
     {
       "name": "sixandout",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 5173,
+      "runtimeArgs": ["run", "dev", "--", "-p", "3005"],
+      "port": 3005,
       "autoPort": false
     }
   ]

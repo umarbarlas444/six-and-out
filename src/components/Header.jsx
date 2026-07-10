@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTheme } from '@/context/ThemeContext.jsx'
 import { useInstallPrompt } from '@/hooks/useInstallPrompt.js'
+import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -17,13 +18,18 @@ import {
 } from '@/components/ui/popover'
 import {
   Sun, Moon, Monitor, Search,
-  LayoutDashboard, Tags, MoreVertical, Download, Share,
+  LayoutDashboard, Tags, MoreVertical, Download, Share, LogOut,
 } from 'lucide-react'
 
 export default function Header({ screen, onNavigate, onSearch }) {
   const { theme, setTheme } = useTheme()
   const { canInstall, isIOS, isStandalone, install } = useInstallPrompt()
   const [iosOpen, setIosOpen] = useState(false)
+
+  const handleSignOut = async () => {
+    await createClient().auth.signOut()
+    window.location.href = '/login'
+  }
 
   const ThemeIcon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor
 
@@ -124,6 +130,18 @@ export default function Header({ screen, onNavigate, onSearch }) {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Sign out — desktop */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 hidden sm:flex"
+            onClick={handleSignOut}
+            title="Sign out"
+          >
+            <LogOut className="h-4 w-4" />
+            <span className="sr-only">Sign out</span>
+          </Button>
+
           {/* Mobile overflow menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -158,6 +176,10 @@ export default function Header({ screen, onNavigate, onSearch }) {
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setTheme('system')}>
                 <Monitor className="mr-2 h-4 w-4" /> System
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleSignOut}>
+                <LogOut className="mr-2 h-4 w-4" /> Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -1,0 +1,196 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.546 0.245 262.881);
+  --primary-foreground: oklch(0.98 0.003 247.858);
+  --secondary: oklch(0.967 0.003 264.542);
+  --secondary-foreground: oklch(0.21 0.034 264.665);
+  --muted: oklch(0.967 0.003 264.542);
+  --muted-foreground: oklch(0.551 0.027 264.364);
+  --accent: oklch(0.967 0.003 264.542);
+  --accent-foreground: oklch(0.21 0.034 264.665);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.98 0.003 247.858);
+  --border: oklch(0.928 0.006 264.531);
+  --input: oklch(0.928 0.006 264.531);
+  --ring: oklch(0.546 0.245 262.881);
+  --radius: 0.625rem;
+}
+
+.dark {
+  --background: oklch(0.13 0.028 261.692);
+  --foreground: oklch(0.969 0.007 247.896);
+  --card: oklch(0.179 0.034 264.665);
+  --card-foreground: oklch(0.969 0.007 247.896);
+  --popover: oklch(0.179 0.034 264.665);
+  --popover-foreground: oklch(0.969 0.007 247.896);
+  --primary: oklch(0.623 0.214 259.815);
+  --primary-foreground: oklch(0.141 0.005 285.823);
+  --secondary: oklch(0.232 0.034 264.665);
+  --secondary-foreground: oklch(0.969 0.007 247.896);
+  --muted: oklch(0.232 0.034 264.665);
+  --muted-foreground: oklch(0.627 0.019 261.325);
+  --accent: oklch(0.232 0.034 264.665);
+  --accent-foreground: oklch(0.969 0.007 247.896);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.141 0.005 285.823);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.623 0.214 259.815);
+}
+
+@theme inline {
+  --color-background:         var(--background);
+  --color-foreground:         var(--foreground);
+  --color-card:               var(--card);
+  --color-card-foreground:    var(--card-foreground);
+  --color-popover:            var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary:            var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary:          var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted:              var(--muted);
+  --color-muted-foreground:   var(--muted-foreground);
+  --color-accent:             var(--accent);
+  --color-accent-foreground:  var(--accent-foreground);
+  --color-destructive:        var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border:             var(--border);
+  --color-input:              var(--input);
+  --color-ring:               var(--ring);
+  --radius-sm:  calc(var(--radius) - 4px);
+  --radius-md:  calc(var(--radius) - 2px);
+  --radius-lg:  var(--radius);
+  --radius-xl:  calc(var(--radius) + 4px);
+}
+
+* {
+  box-sizing: border-box;
+  border-color: var(--border);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter Variable', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* ── FullCalendar theme overrides ───────────────────────────────────────────── */
+.fc-wrapper {
+  --fc-border-color: var(--border);
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: var(--muted);
+  --fc-neutral-text-color: var(--muted-foreground);
+  --fc-today-bg-color: oklch(0.546 0.245 262.881 / 8%);
+  --fc-now-indicator-color: var(--primary);
+  --fc-event-border-color: transparent;
+  --fc-highlight-color: oklch(0.546 0.245 262.881 / 12%);
+}
+
+.fc-wrapper .fc-toolbar-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.fc-wrapper .fc-button {
+  background: var(--secondary) !important;
+  color: var(--secondary-foreground) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: none !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  padding: 0.3rem 0.65rem !important;
+  transition: background 0.15s;
+}
+
+.fc-wrapper .fc-button:hover {
+  background: var(--accent) !important;
+  color: var(--accent-foreground) !important;
+}
+
+.fc-wrapper .fc-button-active,
+.fc-wrapper .fc-button-primary:not(:disabled).fc-button-active {
+  background: var(--primary) !important;
+  color: var(--primary-foreground) !important;
+  border-color: var(--primary) !important;
+}
+
+.fc-wrapper .fc-button-group .fc-button {
+  border-radius: 0 !important;
+}
+.fc-wrapper .fc-button-group .fc-button:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm) !important;
+}
+.fc-wrapper .fc-button-group .fc-button:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0 !important;
+}
+
+.fc-wrapper .fc-col-header-cell-cushion,
+.fc-wrapper .fc-daygrid-day-number,
+.fc-wrapper .fc-timegrid-slot-label-cushion {
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  font-weight: 500;
+  text-decoration: none !important;
+}
+
+.fc-wrapper .fc-daygrid-day.fc-day-today .fc-daygrid-day-number,
+.fc-wrapper .fc-timegrid-col.fc-day-today {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.fc-wrapper .fc-event {
+  border-radius: var(--radius-sm) !important;
+  font-size: 0.76rem !important;
+  font-weight: 500 !important;
+  padding: 1px 4px !important;
+  cursor: pointer;
+}
+
+.fc-wrapper .fc-event:hover {
+  filter: brightness(0.9);
+}
+
+.fc-wrapper .fc-daygrid-dot-event .fc-event-title {
+  font-weight: 500;
+}
+
+.fc-wrapper .fc-timegrid-event .fc-event-title {
+  font-weight: 500;
+}
+
+.fc-wrapper td, .fc-wrapper th {
+  border-color: var(--border) !important;
+}
+
+.fc-wrapper .fc-scrollgrid {
+  border-color: var(--border) !important;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.dark .fc-wrapper .fc-button {
+  background: var(--secondary) !important;
+  color: var(--secondary-foreground) !important;
+}
+
+.dark .fc-wrapper .fc-button:hover {
+  background: var(--accent) !important;
+}
