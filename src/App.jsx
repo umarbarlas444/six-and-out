@@ -2,15 +2,16 @@ import { useState } from 'react'
 import { AppProvider, useApp } from '@/context/AppContext.jsx'
 import { ThemeProvider } from '@/context/ThemeContext.jsx'
 import Header from '@/components/Header.jsx'
-import Home from '@/pages/Home.jsx'
-import StatusMgmt from '@/pages/StatusMgmt.jsx'
+import Dashboard from '@/pages/Dashboard.jsx'
+import CalendarPage from '@/pages/CalendarPage.jsx'
+import Settings from '@/pages/Settings.jsx'
 import BookingForm from '@/pages/BookingForm.jsx'
 import SearchModal from '@/pages/SearchModal.jsx'
 import { Loader2 } from 'lucide-react'
 
 function Shell() {
   const { dbReady, dbError } = useApp()
-  const [screen, setScreen] = useState('home')
+  const [screen, setScreen] = useState('dashboard')
   const [modal, setModal] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
@@ -40,14 +41,13 @@ function Shell() {
       <Header screen={screen} onNavigate={setScreen} onSearch={openSearch} />
 
       <main className="mx-auto w-full max-w-screen-xl flex-1 px-4 py-8 sm:px-6">
-        {screen === 'home' && (
-          <Home
-            onAdd={openAdd}
-            onEdit={openEdit}
-            refreshKey={refreshKey}
-          />
+        {screen === 'dashboard' && (
+          <Dashboard onAdd={openAdd} onEdit={openEdit} refreshKey={refreshKey} />
         )}
-        {screen === 'settings' && <StatusMgmt />}
+        {screen === 'calendar' && (
+          <CalendarPage onAdd={openAdd} onEdit={openEdit} refreshKey={refreshKey} />
+        )}
+        {screen === 'settings' && <Settings />}
       </main>
 
       {modal?.type === 'add' && (

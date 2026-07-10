@@ -1,5 +1,6 @@
 import { supabase } from './supabase.js'
 import { generateId, nowIso, getDayBounds } from './utils.js'
+import { isCompleted } from './lib/stats.js'
 
 export async function initDb() {
   // No-op — data lives in Supabase
@@ -77,6 +78,37 @@ export async function searchOverlap(searchStart, searchEnd) {
     supabase.from('bookings').select('*').is('deleted_at', null).lt('date_start', searchEnd).gt('date_end', searchStart).order('date_start')
   )
   return results.filter(b => b.status_availability !== 'ignore')
+}
+
+// Bookings that still have money owed (advance < total). Completed bookings
+// are settled in full and never owe anything. PostgREST can't compare two
+// columns in a filter, so fetch priced bookings and filter client-side.
+export async function getBookingsWithBalance() {
+  const results = await withStatuses(
+    supabase.from('bookings').select('*').is('deleted_at', null).gt('total_amount', 0).order('date_start', { ascending: false })
+  )
+  return results.filter(b =>
+    !isCompleted(b) && (Number(b.advance_paid) || 0) < (Number(b.total_amount) || 0)
+  )
+}
+
+// ── Inventory ─────────────────────────────────────────────────────────────────
+// A single row (id 'main') holds the current stock of consumables. It is set
+// once from the settings page; stock adjustments will be added later.
+
+export async function getInventory() {
+  const { data, error } = await supabase.from('inventory').select('*').eq('id', 'main').maybeSingle()
+  if (error) throw new Error(error.message)
+  return data
+}
+
+export async function setInventory({ balls_new, balls_old, tapes }) {
+  const now = nowIso()
+  // Plain insert: the primary key rejects a second row, enforcing set-once.
+  const { error } = await supabase
+    .from('inventory')
+    .insert({ id: 'main', balls_new, balls_old, tapes, created_at: now, updated_at: now })
+  if (error) throw new Error(error.message)
 }
 
 // ── Statuses ──────────────────────────────────────────────────────────────────
