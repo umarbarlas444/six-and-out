@@ -50,7 +50,7 @@ function EventPill({ info }) {
   )
 }
 
-export default function CalendarView({ onEdit, onAdd, refreshKey }) {
+export default function CalendarView({ onEdit, onAdd, refreshKey, onLoadingChange }) {
   const calendarRef = useRef(null)
   const [activeView, setActiveView] = useState('dayGridMonth')
 
@@ -190,6 +190,7 @@ export default function CalendarView({ onEdit, onAdd, refreshKey }) {
           eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: true }}
           slotLabelFormat={{ hour: '2-digit', minute: '2-digit', hour12: true }}
           nowIndicator
+          loading={(isLoading) => onLoadingChange?.(isLoading)}
           editable={false}
           selectable={false}
           eventContent={(info) => <EventPill info={info} />}

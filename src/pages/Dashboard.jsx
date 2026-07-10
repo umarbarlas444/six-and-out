@@ -11,6 +11,7 @@ import BookingsList from '@/components/dashboard/BookingsList.jsx'
 import PaymentsDue from '@/components/dashboard/PaymentsDue.jsx'
 import { DailyTrendChart, PeakHoursChart, StatusDonutChart } from '@/components/dashboard/Charts.jsx'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -65,21 +66,27 @@ export default function Dashboard({ onAdd, onEdit, refreshKey }) {
   const [todayBookings, setTodayBookings] = useState([])
   const [dueBookings, setDueBookings] = useState([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
   const today = todayBusinessDay()
   const { startDay, endDay } = getPeriodRange(period, customFrom, customTo)
 
   const load = useCallback(async () => {
-    const todayBounds = getBusinessDayBounds(todayBusinessDay())
-    const [p, t, due] = await Promise.all([
-      getBookingsInRange(getBusinessDayBounds(startDay).start, getBusinessDayBounds(endDay).end),
-      getBookingsInRange(todayBounds.start, todayBounds.end),
-      getBookingsWithBalance(),
-    ])
-    setPeriodBookings(p)
-    setTodayBookings(t)
-    setDueBookings(due)
-    setLoading(false)
+    setRefreshing(true)
+    try {
+      const todayBounds = getBusinessDayBounds(todayBusinessDay())
+      const [p, t, due] = await Promise.all([
+        getBookingsInRange(getBusinessDayBounds(startDay).start, getBusinessDayBounds(endDay).end),
+        getBookingsInRange(todayBounds.start, todayBounds.end),
+        getBookingsWithBalance(),
+      ])
+      setPeriodBookings(p)
+      setTodayBookings(t)
+      setDueBookings(due)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
   }, [startDay, endDay])
 
   useEffect(() => { load() }, [load, refreshKey])
@@ -152,8 +159,8 @@ export default function Dashboard({ onAdd, onEdit, refreshKey }) {
               />
             </div>
           )}
-          <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={load}>
-            <RefreshCw className="h-4 w-4" />
+          <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={load} disabled={refreshing}>
+            <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
             <span className="sr-only">Refresh</span>
           </Button>
           <Button size="sm" className="h-9 gap-1.5" onClick={() => onAdd({ date_start: `${today}T08:00` })}>

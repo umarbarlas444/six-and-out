@@ -8,7 +8,7 @@ export default function CounterInput({ id, label, value, onChange, disabled = fa
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1">
         <Button
           type="button"
           variant="outline"
@@ -27,7 +27,7 @@ export default function CounterInput({ id, label, value, onChange, disabled = fa
           step="1"
           inputMode="numeric"
           placeholder="0"
-          className="text-center"
+          className="flex-1 min-w-0 px-1 text-center [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           value={value}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}

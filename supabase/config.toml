@@ -1,0 +1,3 @@
+# Links this repo's migrations to the hosted Supabase project.
+# The CLI fills in defaults for any section not specified here.
+project_id = "gvmokneokwvrdxnftmag"
