@@ -15,6 +15,17 @@ export function normalizePhone(raw) {
   return digits
 }
 
+// Build a wa.me deep link that opens this number's WhatsApp chat. PK numbers
+// are stored/normalized as local "0XXXXXXXXXX"; wa.me needs the international
+// form — country code, no leading 0 (e.g. 923124617395). Returns '' when
+// there's no usable number.
+export function whatsappUrl(raw) {
+  const local = normalizePhone(raw)
+  if (!local) return ''
+  const intl = /^0\d{10}$/.test(local) ? '92' + local.slice(1) : local
+  return `https://wa.me/${intl}`
+}
+
 export function nowIso() {
   return new Date().toISOString()
 }
