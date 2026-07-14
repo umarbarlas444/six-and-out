@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useApp } from '@/context/AppContext.jsx'
-import { createBooking, updateBooking, deleteBooking, getBookingById, searchOverlap } from '@/db.js'
-import { actualToBusinessValue, businessValueToActualDate, formatTime } from '@/utils.js'
+import {
+  createBooking, updateBooking, deleteBooking, getBookingById, searchOverlap,
+  searchCustomers, findCustomerByPhone, createCustomer,
+} from '@/db.js'
+import { actualToBusinessValue, businessValueToActualDate, formatTime, normalizePhone, whatsappUrl } from '@/utils.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -105,8 +108,108 @@ function DateTimePicker({ value, onChange }) {
   )
 }
 
+// Autocomplete input used for both the customer name and phone fields —
+// either one can drive the same suggestion list (searchCustomers matches on
+// name, phone, and alt_phone), and picking a suggestion fills both fields and
+// links the booking to that customer.
+//
+// The search only fires from this input's own onChange (a real keystroke),
+// never from a value-prop effect — a value-prop effect would also fire when
+// picking a suggestion in the *other* field programmatically updates this
+// one's value, popping its dropdown open right after the user just picked.
+// WhatsApp glyph — lucide has no brand icon, so inline the mark and tint it
+// with currentColor.
+function WhatsappIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.149-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+    </svg>
+  )
+}
+
+function CustomerSuggestInput({ id, label, required, placeholder, autoFocus, value, onChange, onPick, whatsapp }) {
+  const [suggestions, setSuggestions] = useState([])
+  const [open, setOpen] = useState(false)
+  const timerRef = useRef(null)
+
+  useEffect(() => () => clearTimeout(timerRef.current), [])
+
+  const handleChange = (e) => {
+    const v = e.target.value
+    onChange(v)
+    clearTimeout(timerRef.current)
+    const q = v.trim()
+    if (q.length < 2) { setSuggestions([]); setOpen(false); return }
+    timerRef.current = setTimeout(() => {
+      searchCustomers(q)
+        .then((results) => { setSuggestions(results); setOpen(results.length > 0) })
+        .catch(() => {})
+    }, 200)
+  }
+
+  const waUrl = whatsapp ? whatsappUrl(value) : ''
+
+  return (
+    <div className="relative space-y-1.5">
+      <Label htmlFor={id}>{label} {required && <span className="text-destructive">*</span>}</Label>
+      <div className="relative">
+        <Input
+          id={id}
+          placeholder={placeholder}
+          value={value}
+          autoFocus={autoFocus}
+          onChange={handleChange}
+          onFocus={() => { if (suggestions.length > 0) setOpen(true) }}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          autoComplete="off"
+          className={whatsapp ? 'pr-11' : undefined}
+        />
+        {whatsapp && (
+          <a
+            href={waUrl || undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={waUrl ? 'Open WhatsApp chat' : 'Enter a valid number to open WhatsApp'}
+            title={waUrl ? 'Open WhatsApp chat' : 'Enter a valid number'}
+            onClick={(e) => { if (!waUrl) e.preventDefault() }}
+            aria-disabled={!waUrl}
+            className={`absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-[#25D366] transition-colors hover:bg-[#25D366]/15 ${waUrl ? '' : 'pointer-events-none opacity-40'}`}
+          >
+            <WhatsappIcon className="h-[18px] w-[18px]" />
+          </a>
+        )}
+      </div>
+      {open && (
+        <ul className="absolute left-0 top-full z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-md border bg-popover shadow-md">
+          {suggestions.map((c) => (
+            <li key={c.id}>
+              <button
+                type="button"
+                className="flex w-full flex-col px-3 py-2 text-left hover:bg-accent"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  setSuggestions([])
+                  setOpen(false)
+                  onPick(c)
+                }}
+              >
+                <span className="text-sm font-medium">{c.name}</span>
+                {(c.phone || c.alt_phone) && (
+                  <span className="text-xs text-muted-foreground">
+                    {[c.phone, c.alt_phone].filter(Boolean).join(' · ')}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 const empty = {
-  customer_name: '', phone: '', date_start: '', hours: '',
+  customer_name: '', phone: '', customer_id: null, date_start: '', hours: '',
   status: '', notes: '', advance_paid: '', total_amount: '',
   balls_new: '', balls_old: '', tapes: '',
 }
@@ -133,6 +236,7 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
         setForm({
           customer_name: b.customer_name,
           phone: b.phone ?? '',
+          customer_id: b.customer_id ?? null,
           // Show the business day the user thinks in, not the raw calendar date.
           date_start: actualToBusinessValue(b.date_start),
           hours: hours !== '' ? String(hours) : '',
@@ -203,9 +307,35 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
       }
       setConflicts(null)
 
+      // Link (or silently create) a customer for this booking. Phone is the
+      // dedupe key, so a customer record is only worth keeping when there's a
+      // phone — a phoneless, name-keyed customer just duplicates the same
+      // person's phoned record, so we skip creating one and leave customer_id
+      // null. Typing over a previously-picked name/phone clears customer_id
+      // (see field handlers below), so an unlinked save re-resolves here. If a
+      // saved customer was picked from autocomplete, keep that link as-is even
+      // if they happen to have no phone. Never let this block the booking save.
+      let customerId = form.customer_id
+      // Normalized so "+92 312…"/"312…" (missing the leading 0) match the
+      // same customer as "0312…" instead of quietly creating a duplicate;
+      // falls back to the raw trimmed text if it isn't phone-shaped at all.
+      const rawPhone = form.phone.trim()
+      const phone = normalizePhone(rawPhone) || rawPhone
+      try {
+        if (!customerId && phone) {
+          const existing = await findCustomerByPhone(phone)
+          customerId = existing
+            ? existing.id
+            : await createCustomer({ name: form.customer_name.trim(), phone, alt_phone: '', notes: '' })
+        }
+      } catch {
+        customerId = null
+      }
+
       const data = {
         customer_name: form.customer_name.trim(),
-        phone: form.phone.trim(),
+        phone,
+        customer_id: customerId,
         date_start: dateStart.toISOString(),
         date_end: dateEnd.toISOString(),
         status: form.status,
@@ -267,27 +397,25 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
 
           {/* Customer */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="customer_name">
-                Customer name <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="customer_name"
-                placeholder="e.g. Ahmed Ali"
-                value={form.customer_name}
-                onChange={field('customer_name')}
-                autoFocus
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="phone">WhatsApp number</Label>
-              <Input
-                id="phone"
-                placeholder="+92 300 0000000"
-                value={form.phone}
-                onChange={field('phone')}
-              />
-            </div>
+            <CustomerSuggestInput
+              id="customer_name"
+              label="Customer name"
+              required
+              placeholder="e.g. Ahmed Ali"
+              autoFocus
+              value={form.customer_name}
+              onChange={(v) => setForm((f) => ({ ...f, customer_name: v, customer_id: null }))}
+              onPick={(c) => setForm((f) => ({ ...f, customer_name: c.name, phone: c.phone ?? '', customer_id: c.id }))}
+            />
+            <CustomerSuggestInput
+              id="phone"
+              label="WhatsApp number"
+              placeholder="0300 0000000"
+              value={form.phone}
+              whatsapp
+              onChange={(v) => setForm((f) => ({ ...f, phone: v, customer_id: null }))}
+              onPick={(c) => setForm((f) => ({ ...f, customer_name: c.name, phone: c.phone ?? '', customer_id: c.id }))}
+            />
           </div>
 
           {/* Status */}

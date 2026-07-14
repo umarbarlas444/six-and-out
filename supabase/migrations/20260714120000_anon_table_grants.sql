@@ -1,0 +1,29 @@
+-- Grant the Data API roles access to the app tables.
+--
+-- Why this exists: the client talks to Supabase with the anon key and no login
+-- (single-operator, see CLAUDE.md). The live DB already grants anon/authenticated
+-- on the app tables (legacy auto-exposure from the hand-built setup), so it works
+-- in production. A *local* `supabase db reset`, however, creates these tables via
+-- `postgres` with `auto_expose_new_tables` unset (config.toml) — the new Supabase
+-- default is to NOT auto-grant new entities — and the baseline migrations carry no
+-- GRANTs. Result locally: `permission denied for table ...` (SQLSTATE 42501) on the
+-- very first query. This migration makes the grants explicit so local matches prod.
+--
+-- Scope is intentionally limited to the four app tables. The unused multi-tenant /
+-- auth tables (organizations, profiles, organization_members) are deliberately left
+-- OUT so that pushing this to remote can never expose that layer to anon.
+--
+-- Grants are idempotent, so `supabase db push` against prod (where they already
+-- exist) is a no-op. RLS is still intentionally omitted (operator decision, see
+-- migrations/README.md); with RLS disabled locally these grants yield the same
+-- wide-open access prod gets from its allow-all policies.
+
+-- grant usage on schema public to anon, authenticated;
+
+-- grant select, insert, update, delete
+--   on table
+--     public.bookings,
+--     public.statuses,
+--     public.inventory,
+--     public.customers
+--   to anon, authenticated;

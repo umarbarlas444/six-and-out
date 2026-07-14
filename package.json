@@ -7,7 +7,15 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:restart": "supabase restart",
+    "supabase:status": "supabase status",
+    "supabase:db:push": "supabase db push",
+    "supabase:db:reset": "supabase db reset",
+    "supabase:db:pull": "supabase db pull",
+    "supabase:mg:up": "supabase migration up"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
