@@ -11,12 +11,17 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
+
+# Obsidian local config for the docs/brain vault
+docs/brain/.obsidian/
 *.suo
 *.ntvs*
 *.njsproj
