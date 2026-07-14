@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useApp } from '@/context/AppContext.jsx'
-import { createBooking, updateBooking, deleteBooking, getBookingById, searchOverlap } from '@/db.js'
-import { actualToBusinessValue, businessValueToActualDate, formatTime } from '@/utils.js'
+import {
+  createBooking, updateBooking, deleteBooking, getBookingById, searchOverlap,
+  searchCustomers, findCustomerByPhone, createCustomer,
+} from '@/db.js'
+import { actualToBusinessValue, businessValueToActualDate, formatTime, normalizePhone } from '@/utils.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -105,8 +108,79 @@ function DateTimePicker({ value, onChange }) {
   )
 }
 
+// Autocomplete input used for both the customer name and phone fields —
+// either one can drive the same suggestion list (searchCustomers matches on
+// name, phone, and alt_phone), and picking a suggestion fills both fields and
+// links the booking to that customer.
+//
+// The search only fires from this input's own onChange (a real keystroke),
+// never from a value-prop effect — a value-prop effect would also fire when
+// picking a suggestion in the *other* field programmatically updates this
+// one's value, popping its dropdown open right after the user just picked.
+function CustomerSuggestInput({ id, label, required, placeholder, autoFocus, value, onChange, onPick }) {
+  const [suggestions, setSuggestions] = useState([])
+  const [open, setOpen] = useState(false)
+  const timerRef = useRef(null)
+
+  useEffect(() => () => clearTimeout(timerRef.current), [])
+
+  const handleChange = (e) => {
+    const v = e.target.value
+    onChange(v)
+    clearTimeout(timerRef.current)
+    const q = v.trim()
+    if (q.length < 2) { setSuggestions([]); setOpen(false); return }
+    timerRef.current = setTimeout(() => {
+      searchCustomers(q)
+        .then((results) => { setSuggestions(results); setOpen(results.length > 0) })
+        .catch(() => {})
+    }, 200)
+  }
+
+  return (
+    <div className="relative space-y-1.5">
+      <Label htmlFor={id}>{label} {required && <span className="text-destructive">*</span>}</Label>
+      <Input
+        id={id}
+        placeholder={placeholder}
+        value={value}
+        autoFocus={autoFocus}
+        onChange={handleChange}
+        onFocus={() => { if (suggestions.length > 0) setOpen(true) }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        autoComplete="off"
+      />
+      {open && (
+        <ul className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-md border bg-popover shadow-md">
+          {suggestions.map((c) => (
+            <li key={c.id}>
+              <button
+                type="button"
+                className="flex w-full flex-col px-3 py-2 text-left hover:bg-accent"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  setSuggestions([])
+                  setOpen(false)
+                  onPick(c)
+                }}
+              >
+                <span className="text-sm font-medium">{c.name}</span>
+                {(c.phone || c.alt_phone) && (
+                  <span className="text-xs text-muted-foreground">
+                    {[c.phone, c.alt_phone].filter(Boolean).join(' · ')}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 const empty = {
-  customer_name: '', phone: '', date_start: '', hours: '',
+  customer_name: '', phone: '', customer_id: null, date_start: '', hours: '',
   status: '', notes: '', advance_paid: '', total_amount: '',
   balls_new: '', balls_old: '', tapes: '',
 }
@@ -133,6 +207,7 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
         setForm({
           customer_name: b.customer_name,
           phone: b.phone ?? '',
+          customer_id: b.customer_id ?? null,
           // Show the business day the user thinks in, not the raw calendar date.
           date_start: actualToBusinessValue(b.date_start),
           hours: hours !== '' ? String(hours) : '',
@@ -203,9 +278,35 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
       }
       setConflicts(null)
 
+      // Link (or silently create) a customer for this booking. Phone is the
+      // dedupe key, so a customer record is only worth keeping when there's a
+      // phone — a phoneless, name-keyed customer just duplicates the same
+      // person's phoned record, so we skip creating one and leave customer_id
+      // null. Typing over a previously-picked name/phone clears customer_id
+      // (see field handlers below), so an unlinked save re-resolves here. If a
+      // saved customer was picked from autocomplete, keep that link as-is even
+      // if they happen to have no phone. Never let this block the booking save.
+      let customerId = form.customer_id
+      // Normalized so "+92 312…"/"312…" (missing the leading 0) match the
+      // same customer as "0312…" instead of quietly creating a duplicate;
+      // falls back to the raw trimmed text if it isn't phone-shaped at all.
+      const rawPhone = form.phone.trim()
+      const phone = normalizePhone(rawPhone) || rawPhone
+      try {
+        if (!customerId && phone) {
+          const existing = await findCustomerByPhone(phone)
+          customerId = existing
+            ? existing.id
+            : await createCustomer({ name: form.customer_name.trim(), phone, alt_phone: '', notes: '' })
+        }
+      } catch {
+        customerId = null
+      }
+
       const data = {
         customer_name: form.customer_name.trim(),
-        phone: form.phone.trim(),
+        phone,
+        customer_id: customerId,
         date_start: dateStart.toISOString(),
         date_end: dateEnd.toISOString(),
         status: form.status,
@@ -267,27 +368,24 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
 
           {/* Customer */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="customer_name">
-                Customer name <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="customer_name"
-                placeholder="e.g. Ahmed Ali"
-                value={form.customer_name}
-                onChange={field('customer_name')}
-                autoFocus
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="phone">WhatsApp number</Label>
-              <Input
-                id="phone"
-                placeholder="+92 300 0000000"
-                value={form.phone}
-                onChange={field('phone')}
-              />
-            </div>
+            <CustomerSuggestInput
+              id="customer_name"
+              label="Customer name"
+              required
+              placeholder="e.g. Ahmed Ali"
+              autoFocus
+              value={form.customer_name}
+              onChange={(v) => setForm((f) => ({ ...f, customer_name: v, customer_id: null }))}
+              onPick={(c) => setForm((f) => ({ ...f, customer_name: c.name, phone: c.phone ?? '', customer_id: c.id }))}
+            />
+            <CustomerSuggestInput
+              id="phone"
+              label="WhatsApp number"
+              placeholder="0300 0000000"
+              value={form.phone}
+              onChange={(v) => setForm((f) => ({ ...f, phone: v, customer_id: null }))}
+              onPick={(c) => setForm((f) => ({ ...f, customer_name: c.name, phone: c.phone ?? '', customer_id: c.id }))}
+            />
           </div>
 
           {/* Status */}

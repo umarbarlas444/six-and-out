@@ -2,6 +2,19 @@ export function generateId() {
   return crypto.randomUUID()
 }
 
+// PK phone numbers get typed in wildly different shapes (+92, 0092, missing
+// the leading 0, spaces/dashes). Normalizing to the local "0XXXXXXXXXX" form
+// is what lets the same number dedupe to one customer regardless of how it
+// was typed — mirrors pg_temp.normalize_pk_phone() in the customers
+// migration (supabase/migrations/20260713120000_customers.sql).
+export function normalizePhone(raw) {
+  const digits = (raw || '').replace(/\D/g, '')
+  if (!digits) return ''
+  if (/^92\d{10}$/.test(digits)) return '0' + digits.slice(2)   // +92XXXXXXXXXX -> 0XXXXXXXXXX
+  if (/^3\d{9}$/.test(digits)) return '0' + digits              // 3XXXXXXXXX (missing 0) -> 03XXXXXXXXX
+  return digits
+}
+
 export function nowIso() {
   return new Date().toISOString()
 }

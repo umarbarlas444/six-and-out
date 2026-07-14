@@ -1,5 +1,5 @@
 import { supabase } from './supabase.js'
-import { generateId, nowIso, getDayBounds } from './utils.js'
+import { generateId, nowIso, getDayBounds, normalizePhone } from './utils.js'
 import { isCompleted } from './lib/stats.js'
 
 export async function initDb() {
@@ -167,5 +167,147 @@ export async function deleteStatus(id) {
 export async function reorderStatuses(orderedIds) {
   await Promise.all(
     orderedIds.map((id, i) => supabase.from('statuses').update({ sort_order: i }).eq('id', id))
+  )
+}
+
+// ── Customers ─────────────────────────────────────────────────────────────────
+// Bookings snapshot customer_name/phone at save time and optionally link to a
+// customer row via customer_id — see CLAUDE.md for the FK + snapshot rationale.
+
+// Neutralize characters that are structural in a PostgREST `.or()` filter
+// (`,()`) or act as ilike wildcards (`% _ *`) or escapes (`\`), so a search
+// term is matched literally instead of breaking the query or turning into a
+// wildcard. Collapses the resulting whitespace.
+function sanitizeSearchTerm(s) {
+  return (s || '').replace(/[,()%_*\\]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+// Turn a customer write error into a friendly message. The partial unique
+// index on customers(phone) (20260714160000_customers_phone_unique) raises
+// 23505 when a second active customer reuses a phone number.
+function customerWriteError(error) {
+  if (error.code === '23505') return new Error('A customer with this phone number already exists.')
+  return new Error(error.message)
+}
+
+// Columns of the customer_directory view that the UI is allowed to sort by.
+// Whitelisted so a bad sortBy can't reach PostgREST's order clause. `name`
+// maps to the view's case-insensitive `name_ci` so sorting isn't at the mercy
+// of the column collation.
+const CUSTOMER_SORT_COLUMNS = {
+  name: 'name_ci',
+  booking_count: 'booking_count',
+  revenue: 'revenue',
+  outstanding: 'outstanding',
+  last_booking_at: 'last_booking_at',
+  created_at: 'created_at',
+}
+
+// One page of the customer_directory view (customers decorated with booking
+// count + revenue/outstanding), searched/sorted/paginated server-side so the
+// screen stays fast as the customer list grows. Returns { rows, total } where
+// total is the full match count (for pagination), not just this page.
+export async function getCustomersPage({
+  search = '', sortBy = 'name', sortDir = 'asc', page = 0, pageSize = 20,
+} = {}) {
+  const column = CUSTOMER_SORT_COLUMNS[sortBy] ?? CUSTOMER_SORT_COLUMNS.name
+  const ascending = sortDir === 'asc'
+  const from = page * pageSize
+  const to = from + pageSize - 1
+
+  let query = supabase.from('customer_directory').select('*', { count: 'exact' })
+
+  const q = sanitizeSearchTerm(search)
+  if (q) query = query.or(`name.ilike.%${q}%,phone.ilike.%${q}%,alt_phone.ilike.%${q}%`)
+
+  // Secondary order on id keeps paging stable when the sort column ties
+  // (e.g. many customers with 0 bookings).
+  query = query
+    .order(column, { ascending, nullsFirst: false })
+    .order('id', { ascending: true })
+    .range(from, to)
+
+  const { data, error, count } = await query
+  if (error) throw new Error(error.message)
+  return { rows: data ?? [], total: count ?? 0 }
+}
+
+export async function getCustomerById(id) {
+  const { data, error } = await supabase.from('customers').select('*').eq('id', id).is('deleted_at', null).single()
+  if (error) return null
+  return data
+}
+
+// Autocomplete for the booking form's name/phone fields: matches on name,
+// phone, or alt_phone so either input can drive the same suggestion list.
+// Only a *phone-shaped* query (digits + phone punctuation, no letters) is
+// normalized, so stray formatting (spaces/dashes/+92) still matches the
+// normalized digits stored in the phone column; a name query — including one
+// that contains digits like "Ground 5" — is searched literally.
+export async function searchCustomers(query, limit = 8) {
+  const raw = (query || '').trim()
+  const phoneish = /\d/.test(raw) && !/[a-z]/i.test(raw)
+  const q = phoneish ? (normalizePhone(raw) || sanitizeSearchTerm(raw)) : sanitizeSearchTerm(raw)
+  if (!q) return []
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .is('deleted_at', null)
+    .or(`name.ilike.%${q}%,phone.ilike.%${q}%,alt_phone.ilike.%${q}%`)
+    .order('name')
+    .limit(limit)
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+// Phone is the dedupe key: an exact match here means "same customer"
+// regardless of name spelling. Normalizing first means "+92 312…",
+// "0092 312…", and "312…" (missing leading 0) all match the same stored row.
+export async function findCustomerByPhone(phone) {
+  const normalized = normalizePhone(phone)
+  if (!normalized) return null
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('phone', normalized)
+    .is('deleted_at', null)
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return data
+}
+
+// Storing phone in its normalized form (rather than however it was typed) is
+// what keeps findCustomerByPhone's exact match and the Customers-screen
+// duplicate-phone check working — see normalizePhone in utils.js.
+export async function createCustomer(data) {
+  const id = generateId()
+  const now = nowIso()
+  const phone = data.phone ? normalizePhone(data.phone) : data.phone
+  const { error } = await supabase.from('customers').insert({ ...data, phone, id, created_at: now, updated_at: now })
+  if (error) throw customerWriteError(error)
+  return id
+}
+
+export async function updateCustomer(id, data) {
+  const patch = { ...data, updated_at: nowIso() }
+  if (patch.phone) patch.phone = normalizePhone(patch.phone)
+  const { error } = await supabase.from('customers').update(patch).eq('id', id)
+  if (error) throw customerWriteError(error)
+}
+
+// Soft delete only — bookings keep their customer_id and snapshot fields, so
+// history stays intact and every customer read filters deleted_at.
+export async function deleteCustomer(id) {
+  const { error } = await supabase
+    .from('customers')
+    .update({ deleted_at: nowIso() })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function getBookingsByCustomer(customerId) {
+  return withStatuses(
+    supabase.from('bookings').select('*').is('deleted_at', null).eq('customer_id', customerId).order('date_start', { ascending: false })
   )
 }
