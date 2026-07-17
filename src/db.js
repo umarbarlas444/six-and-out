@@ -1,6 +1,7 @@
 import { supabase } from './supabase.js'
-import { generateId, nowIso, getDayBounds, normalizePhone } from './utils.js'
+import { generateId, nowIso, getDayBounds, normalizePhone, businessDayKey, getBusinessDayBounds, addDays, formatDateInput } from './utils.js'
 import { isCompleted } from './lib/stats.js'
+import { computeLeaderboard } from './lib/leaderboard.js'
 
 export async function initDb() {
   // No-op — data lives in Supabase
@@ -310,4 +311,170 @@ export async function getBookingsByCustomer(customerId) {
   return withStatuses(
     supabase.from('bookings').select('*').is('deleted_at', null).eq('customer_id', customerId).order('date_start', { ascending: false })
   )
+}
+
+// ── Series matches ──────────────────────────────────────────────────────────
+// A booking hosts a series of matches (booking_matches rows). Team 2 and the
+// series_winner_id live on the booking itself; the per-match winners live here.
+
+export async function getMatchesByBooking(bookingId) {
+  const { data, error } = await supabase
+    .from('booking_matches')
+    .select('*')
+    .eq('booking_id', bookingId)
+    .order('match_number')
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+export async function getMatchesForBookings(bookingIds) {
+  if (!bookingIds || bookingIds.length === 0) return []
+  const { data, error } = await supabase
+    .from('booking_matches')
+    .select('*')
+    .in('booking_id', bookingIds)
+    .order('match_number')
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+// Replace a booking's whole match set. The list is small and fully edited in
+// the form, so delete-then-insert is the simplest way to keep stored rows in
+// sync with what the operator sees. `matches` is [{ winner }] in play order.
+export async function replaceBookingMatches(bookingId, matches) {
+  const { error: delErr } = await supabase.from('booking_matches').delete().eq('booking_id', bookingId)
+  if (delErr) throw new Error(delErr.message)
+  if (!matches || matches.length === 0) return
+  const now = nowIso()
+  const rows = matches.map((m, i) => ({
+    id: generateId(),
+    booking_id: bookingId,
+    match_number: i + 1,
+    winner: m.winner,
+    created_at: now,
+    updated_at: now,
+  }))
+  const { error } = await supabase.from('booking_matches').insert(rows)
+  if (error) throw new Error(error.message)
+}
+
+// ── Leaderboard ─────────────────────────────────────────────────────────────
+// Ranked teams + month totals for one business-month ('YYYY-MM'). Mirrors
+// stats.js: the business-day (5 AM) month logic runs client-side, then the pure
+// reducer in lib/leaderboard.js does the aggregation. Returns
+// { teams, stats: { teams, series, matches, draws } } — stats are constant-size
+// month summaries (they don't grow with the team count) for the summary card.
+
+// The calendar range to fetch for a business-month, padded a day each side so a
+// pre-5 AM booking that business-day-shifts into (or out of) the month is still
+// caught. Callers must still filter precisely with businessDayKey.
+function monthFetchRange(monthKey) {
+  const [y, m] = monthKey.split('-').map(Number)
+  const firstDay = `${monthKey}-01`
+  const lastDay = formatDateInput(new Date(y, m, 0)) // day 0 of next month = last day of this one
+  return {
+    rangeStart: getBusinessDayBounds(addDays(firstDay, -1)).start,
+    rangeEnd: getBusinessDayBounds(addDays(lastDay, 1)).end,
+  }
+}
+
+export async function getLeaderboardMonth(monthKey) {
+  const { rangeStart, rangeEnd } = monthFetchRange(monthKey)
+
+  const bookings = await getBookingsInRange(rangeStart, rangeEnd)
+  const inMonth = bookings.filter(b => businessDayKey(b.date_start).slice(0, 7) === monthKey)
+
+  const matches = await getMatchesForBookings(inMonth.map(b => b.id))
+  const matchesByBooking = {}
+  for (const mm of matches) (matchesByBooking[mm.booking_id] ??= []).push(mm)
+
+  const teams = computeLeaderboard(inMonth, matchesByBooking)
+  const stats = {
+    teams: teams.length,                                     // ranked (linked) teams
+    series: Object.keys(matchesByBooking).length,            // bookings that had ≥1 match
+    matches: matches.length,
+    draws: matches.filter(mm => mm.winner == null).length,   // null winner = draw
+  }
+  return { teams, stats }
+}
+
+// ── Team detail ─────────────────────────────────────────────────────────────
+// One team's series (a series = a booking that had ≥1 match), newest first, for
+// the leaderboard's team modal.
+//
+// A team sits in EITHER booking slot, so this filters customer_id OR
+// customer_id_2 — getBookingsByCustomer is not reusable here (it only checks
+// customer_id and would miss every series the team played as Team 2).
+//
+// monthKey null = all time, paginated server-side. monthKey set = that business
+// month; the 5 AM business-day rule is local-tz JS, so it can't be pushed into a
+// server range — fetch the padded month and filter/slice client-side (one month
+// of bookings is cheap).
+
+// Turn one booking + its matches into a series row from `myId`'s point of view.
+function toSeriesRow(b, matches, myId) {
+  const iAmTeam1 = b.customer_id === myId
+  const oppId = iAmTeam1 ? b.customer_id_2 : b.customer_id
+  const oppName = (iAmTeam1 ? b.customer_name_2 : b.customer_name) || 'Unknown'
+
+  let won = 0, lost = 0, drawn = 0
+  for (const m of matches) {
+    if (m.winner == null) drawn++
+    else if (m.winner === myId) won++
+    else if (m.winner === oppId) lost++
+  }
+  // Mirrors seriesOutcome() in lib/leaderboard.js: wins decide it, drawn matches
+  // don't. 0–0 (all drawn) reads as a draw here rather than "no result".
+  const result = won > lost ? 'won' : won < lost ? 'lost' : 'draw'
+
+  return { bookingId: b.id, date: b.date_start, opponentName: oppName, result, won, lost, drawn }
+}
+
+export async function getTeamSeries(customerId, { monthKey = null, page = 0, pageSize = 10 } = {}) {
+  const orFilter = `customer_id.eq.${customerId},customer_id_2.eq.${customerId}`
+
+  let bookings = []
+  let total = 0
+
+  if (monthKey) {
+    const { rangeStart, rangeEnd } = monthFetchRange(monthKey)
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .is('deleted_at', null)
+      .or(orFilter)
+      .lt('date_start', rangeEnd)
+      .gt('date_end', rangeStart)
+      .order('date_start', { ascending: false })
+    if (error) throw new Error(error.message)
+    const inMonth = (data ?? []).filter(b => businessDayKey(b.date_start).slice(0, 7) === monthKey)
+    total = inMonth.length
+    bookings = inMonth.slice(page * pageSize, page * pageSize + pageSize)
+  } else {
+    const from = page * pageSize
+    const { data, error, count } = await supabase
+      .from('bookings')
+      .select('*', { count: 'exact' })
+      .is('deleted_at', null)
+      .or(orFilter)
+      .order('date_start', { ascending: false })
+      .range(from, from + pageSize - 1)
+    if (error) throw new Error(error.message)
+    bookings = data ?? []
+    total = count ?? 0
+  }
+
+  const matches = await getMatchesForBookings(bookings.map(b => b.id))
+  const byBooking = {}
+  for (const m of matches) (byBooking[m.booking_id] ??= []).push(m)
+
+  // A booking with no matches isn't a series — drop it from the list. (It can
+  // still be counted in `total` for the all-time path, where we can't know a
+  // booking's match count before fetching; accepted: the pager may show a page
+  // with fewer than pageSize rows.)
+  const rows = bookings
+    .filter(b => (byBooking[b.id] ?? []).length > 0)
+    .map(b => toSeriesRow(b, byBooking[b.id], customerId))
+
+  return { rows, total }
 }

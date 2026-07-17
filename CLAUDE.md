@@ -42,3 +42,7 @@ The ground's operating day runs 5 AM–5 AM, not midnight–midnight (`BUSINESS_
 ### Feature/decision brain
 
 [docs/brain/](docs/brain/) is an Obsidian vault logging *why* features were built and decisions were made, complementing this file's *what/how*. Check it for context on non-obvious history; add a note there when shipping a notable feature or making a decision worth remembering.
+
+
+## Playwrite MCP
+- Never use playright for testing.
