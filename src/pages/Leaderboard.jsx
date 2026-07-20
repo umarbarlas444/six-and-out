@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import TeamSeriesModal from '@/components/TeamSeriesModal.jsx'
+import Avatar from '@/components/Avatar.jsx'
 import {
   ChevronLeft, ChevronRight, Loader2, Trophy, Crown,
   ChevronUp, ChevronDown, Minus, Users, Swords, Activity, Handshake,
@@ -27,12 +28,6 @@ function shiftMonth(monthKey, delta) {
 }
 
 const currentMonth = () => todayBusinessDay().slice(0, 7)
-
-function initials(name) {
-  const parts = (name || '').trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return '?'
-  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase()
-}
 
 const ordinal = (n) => {
   const s = ['th', 'st', 'nd', 'rd']
@@ -99,17 +94,6 @@ const MEDAL = {
     text: 'text-white', sub: 'text-white/85',
     icon: 'text-[#a86b3c]', iconBg: 'bg-[#a86b3c]/15', rowWash: 'bg-[#a86b3c]/[0.06]',
   },
-}
-
-function Avatar({ name, className = '', ringClass = '' }) {
-  return (
-    <div
-      className={`flex items-center justify-center rounded-full bg-gradient-to-br from-muted to-accent font-semibold text-foreground/80 ${ringClass ? `ring-2 ${ringClass} ring-offset-2 ring-offset-card` : ''} ${className}`}
-      aria-hidden="true"
-    >
-      {initials(name)}
-    </div>
-  )
 }
 
 function MedalBadge({ rank }) {
@@ -200,6 +184,7 @@ function ChampionHero({ champion, monthKey, board, onTeamClick }) {
             <span className="absolute inset-0 rounded-full bg-amber-300/40 blur-md" aria-hidden="true" />
             <Avatar
               name={champion.name}
+              src={champion.avatar_url}
               className="relative h-16 w-16 text-xl ring-4 ring-amber-300/80 ring-offset-2 ring-offset-transparent sm:h-20 sm:w-20 sm:text-2xl"
             />
             <Crown className="absolute -top-3.5 left-1/2 h-6 w-6 -translate-x-1/2 fill-amber-300 text-amber-400 drop-shadow" aria-hidden="true" />
@@ -239,6 +224,7 @@ function PodiumSpot({ team, rank, board, onTeamClick }) {
       >
         <Avatar
           name={team.name}
+          src={team.avatar_url}
           ringClass={s.ring}
           className={`lb-pop mb-2 ${rank === 1 ? 'h-12 w-12 text-base sm:h-14 sm:w-14' : 'h-10 w-10 text-sm'}`}
         />
@@ -392,7 +378,7 @@ function BoardPanel({ board, rows, prevRanks, stats, monthKey, page, setPage, on
                         className="flex min-h-11 w-full min-w-0 items-center gap-2.5 rounded-md text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         title={`View ${t.name}'s series`}
                       >
-                        <Avatar name={t.name} className="h-9 w-9 shrink-0 text-xs" />
+                        <Avatar name={t.name} src={t.avatar_url} className="h-9 w-9 shrink-0 text-xs" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium" title={t.name}>{t.name}</span>
                           <span className="mt-1 flex h-1.5 max-w-[200px] overflow-hidden rounded-full bg-muted" aria-hidden="true">

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { getTeamSeries } from '@/db.js'
 import { businessDayKey, formatTime } from '@/utils.js'
 import { Button } from '@/components/ui/button'
+import Avatar from '@/components/Avatar.jsx'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog'
@@ -24,21 +25,10 @@ function seriesDate(iso) {
     .toUpperCase()
 }
 
-function initials(name) {
-  const parts = (name || '').trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return '?'
-  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase()
-}
-
-function Crest({ name, className = '' }) {
-  return (
-    <span
-      className={`flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-muted to-accent text-[10px] font-bold text-foreground/70 ${className}`}
-      aria-hidden="true"
-    >
-      {initials(name)}
-    </span>
-  )
+// The shared avatar at this screen's crest sizing: initials here are smaller and
+// bolder than the default because they sit inside 8-10px chips.
+function Crest({ name, src, className = '' }) {
+  return <Avatar name={name} src={src} className={`text-[10px] font-bold text-foreground/70 ${className}`} />
 }
 
 // Result drives the scoreboard's colour: the badge and the card's underline.
@@ -90,7 +80,7 @@ export default function TeamSeriesModal({ team, monthKey, onClose, onEditBooking
       <DialogContent className="max-h-[90vh] w-full overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
-            <Crest name={team.name} className="h-10 w-10 text-sm" />
+            <Crest name={team.name} src={team.avatar_url} className="h-10 w-10 text-sm" />
             <span className="min-w-0 truncate" title={team.name}>{team.name}</span>
           </DialogTitle>
           <DialogDescription>
@@ -158,7 +148,7 @@ export default function TeamSeriesModal({ team, monthKey, onClose, onEditBooking
                       {/* this team — crest hidden on mobile to buy name width;
                           it's the same team on every row and already in the header */}
                       <span className="flex min-w-0 flex-1 items-center gap-2">
-                        <Crest name={team.name} className="hidden h-8 w-8 sm:flex" />
+                        <Crest name={team.name} src={team.avatar_url} className="hidden h-8 w-8 sm:flex" />
                         <span className="min-w-0 truncate text-xs font-bold uppercase tracking-tight sm:text-sm" title={team.name}>
                           {team.name}
                         </span>
@@ -181,7 +171,7 @@ export default function TeamSeriesModal({ team, monthKey, onClose, onEditBooking
                         <span className="min-w-0 truncate text-right text-xs font-bold uppercase tracking-tight sm:text-sm" title={r.opponentName}>
                           {r.opponentName}
                         </span>
-                        <Crest name={r.opponentName} className="hidden h-8 w-8 sm:flex" />
+                        <Crest name={r.opponentName} src={r.opponentAvatarUrl} className="hidden h-8 w-8 sm:flex" />
                       </span>
                     </button>
                   </li>
