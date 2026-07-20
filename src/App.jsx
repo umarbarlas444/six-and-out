@@ -7,6 +7,7 @@ import CalendarPage from '@/pages/CalendarPage.jsx'
 import Settings from '@/pages/Settings.jsx'
 import Customers from '@/pages/Customers.jsx'
 import Leaderboard from '@/pages/Leaderboard.jsx'
+import Expenses from '@/pages/Expenses.jsx'
 import BookingForm from '@/pages/BookingForm.jsx'
 import SearchModal from '@/pages/SearchModal.jsx'
 import { Loader2 } from 'lucide-react'
@@ -54,6 +55,9 @@ function Shell() {
         )}
         {screen === 'leaderboard' && (
           <Leaderboard onEditBooking={openEdit} refreshKey={refreshKey} />
+        )}
+        {screen === 'expenses' && (
+          <Expenses refreshKey={refreshKey} />
         )}
         {screen === 'settings' && <Settings />}
       </main>

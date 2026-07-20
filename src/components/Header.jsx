@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/popover'
 import {
   Sun, Moon, Monitor, Search,
-  LayoutDashboard, CalendarRange, Users, Trophy, Settings, MoreVertical, Download, Share,
+  LayoutDashboard, CalendarRange, Users, Trophy, Receipt, Settings, MoreVertical, Download, Share,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
@@ -25,6 +25,7 @@ const NAV_ITEMS = [
   { key: 'calendar', label: 'Calendar', Icon: CalendarRange },
   { key: 'customers', label: 'Customers', Icon: Users },
   { key: 'leaderboard', label: 'Leaderboard', Icon: Trophy },
+  { key: 'expenses', label: 'Expenses', Icon: Receipt },
   { key: 'settings', label: 'Settings', Icon: Settings },
 ]
 

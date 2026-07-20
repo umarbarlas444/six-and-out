@@ -2,59 +2,21 @@ import { useState, useEffect, useCallback } from 'react'
 import { useApp } from '@/context/AppContext.jsx'
 import { getBookingsInRange, getBookingsWithBalance, updateBooking } from '@/db.js'
 import {
-  addDays, formatDate, formatDateInput, getBusinessDayBounds,
-  businessDayKey, todayBusinessDay,
+  formatDate, getBusinessDayBounds, businessDayKey, todayBusinessDay,
 } from '@/utils.js'
+import { getPeriodRange, periodLabel as resolvePeriodLabel, periodDayCount } from '@/lib/period.js'
 import { computeStats, dailySeries, hourHistogram, statusBreakdown } from '@/lib/stats.js'
+import DateRangeFilter from '@/components/DateRangeFilter.jsx'
 import StatCard from '@/components/dashboard/StatCard.jsx'
 import BookingsList from '@/components/dashboard/BookingsList.jsx'
 import PaymentsDue from '@/components/dashboard/PaymentsDue.jsx'
 import { DailyTrendChart, PeakHoursChart, StatusDonutChart } from '@/components/dashboard/Charts.jsx'
 import { Button } from '@/components/ui/button'
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
-import {
   CalendarCheck, Clock, Banknote, Wallet, Loader2, Plus, RefreshCw,
 } from 'lucide-react'
 
-const PERIOD_LABELS = {
-  today: 'Today',
-  week: 'This week',
-  month: 'This month',
-  custom: 'Custom range',
-}
-
-// Selected period as inclusive business days ('YYYY-MM-DD').
-function getPeriodRange(period, customFrom, customTo) {
-  const today = todayBusinessDay()
-  switch (period) {
-    case 'today':
-      return { startDay: today, endDay: today }
-    case 'week': {
-      // Monday-based week of the current business day.
-      const dow = (new Date(today + 'T12:00:00').getDay() + 6) % 7
-      const startDay = addDays(today, -dow)
-      return { startDay, endDay: addDays(startDay, 6) }
-    }
-    case 'month': {
-      const d = new Date(today + 'T12:00:00')
-      return {
-        startDay: formatDateInput(new Date(d.getFullYear(), d.getMonth(), 1)),
-        endDay: formatDateInput(new Date(d.getFullYear(), d.getMonth() + 1, 0)),
-      }
-    }
-    default:
-      return customFrom <= customTo
-        ? { startDay: customFrom, endDay: customTo }
-        : { startDay: customTo, endDay: customFrom }
-  }
-}
-
 const fmtPKR = (n) => `PKR ${Math.round(n).toLocaleString()}`
-
-// 'YYYY-MM-DD' -> 'DD/MM/YYYY'
-const fmtRangeDate = (day) => new Date(day + 'T12:00:00').toLocaleDateString('en-GB')
 
 export default function Dashboard({ onAdd, onEdit, refreshKey }) {
   const { statuses } = useApp()
@@ -105,10 +67,8 @@ export default function Dashboard({ onAdd, onEdit, refreshKey }) {
     .filter((b) => businessDayKey(b.date_start) === today)
     .sort((a, b) => a.date_start.localeCompare(b.date_start))
 
-  const periodDays = Math.round((new Date(endDay) - new Date(startDay)) / 86400000) + 1
-  const periodLabel = period === 'custom'
-    ? `${formatDate(startDay + 'T12:00:00')} – ${formatDate(endDay + 'T12:00:00')}`
-    : PERIOD_LABELS[period]
+  const periodDays = periodDayCount(startDay, endDay)
+  const periodLabel = resolvePeriodLabel(period, startDay, endDay)
 
   return (
     <div className="space-y-6">
@@ -120,38 +80,13 @@ export default function Dashboard({ onAdd, onEdit, refreshKey }) {
           <p className="text-sm text-muted-foreground">Overview of bookings, revenue and payments.</p>
         </div>
         <div className="flex flex-row flex-wrap items-center gap-2 sm:ml-auto">
-          <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="h-9 w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(PERIOD_LABELS).map(([k, label]) => (
-                <SelectItem key={k} value={k}>{label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {period !== 'custom' && (
-            <span className="text-sm tabular-nums text-muted-foreground">
-              {fmtRangeDate(startDay)}{endDay !== startDay ? ` – ${fmtRangeDate(endDay)}` : ''}
-            </span>
-          )}
-          {period === 'custom' && (
-            <div className="flex items-center gap-1.5">
-              <input
-                type="date"
-                value={customFrom}
-                onChange={(e) => e.target.value && setCustomFrom(e.target.value)}
-                className="h-9 rounded-md border bg-transparent px-2 text-sm outline-none"
-              />
-              <span className="text-sm text-muted-foreground">–</span>
-              <input
-                type="date"
-                value={customTo}
-                onChange={(e) => e.target.value && setCustomTo(e.target.value)}
-                className="h-9 rounded-md border bg-transparent px-2 text-sm outline-none"
-              />
-            </div>
-          )}
+          <DateRangeFilter
+            period={period}
+            onPeriodChange={setPeriod}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomChange={(from, to) => { setCustomFrom(from); setCustomTo(to) }}
+          />
           <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={load}>
             <RefreshCw className="h-4 w-4" />
             <span className="sr-only">Refresh</span>

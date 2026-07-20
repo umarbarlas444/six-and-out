@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react'
 import StatusMgmt from './StatusMgmt.jsx'
+import ExpenseCategoryMgmt from './ExpenseCategoryMgmt.jsx'
 import { getInventory, setInventory } from '@/db.js'
 import { formatDate } from '@/utils.js'
 import CounterInput from '@/components/CounterInput.jsx'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { AlertCircle, Loader2, Lock } from 'lucide-react'
+import { AlertCircle, Loader2, Lock, Tags, Receipt, Boxes } from 'lucide-react'
 
 const ITEMS = [
   { key: 'balls_new', label: 'New balls' },
@@ -126,12 +126,44 @@ function InventorySection() {
   )
 }
 
+// Settings sections, in sidebar order. The first is selected by default.
+const SECTIONS = [
+  { key: 'statuses', label: 'Booking Statuses', Icon: Tags, Component: StatusMgmt },
+  { key: 'expense-categories', label: 'Expense Categories', Icon: Receipt, Component: ExpenseCategoryMgmt },
+  { key: 'inventory', label: 'Inventory Stock', Icon: Boxes, Component: InventorySection },
+]
+
 export default function Settings() {
+  const [section, setSection] = useState(SECTIONS[0].key)
+  const active = SECTIONS.find((s) => s.key === section) ?? SECTIONS[0]
+  const ActiveSection = active.Component
+
   return (
-    <div className="mx-auto max-w-2xl space-y-8">
-      <StatusMgmt />
-      <Separator />
-      <InventorySection />
+    <div className="mx-auto flex max-w-5xl flex-col gap-8 sm:flex-row">
+      {/* Section nav — a sidebar on desktop, a scrollable row of chips on mobile */}
+      <nav
+        aria-label="Settings sections"
+        className="-mx-1 flex shrink-0 gap-1 overflow-x-auto px-1 pb-1 sm:mx-0 sm:w-56 sm:flex-col sm:overflow-visible sm:px-0 sm:pb-0"
+      >
+        {SECTIONS.map(({ key, label, Icon }) => (
+          <Button
+            key={key}
+            variant={section === key ? 'secondary' : 'ghost'}
+            size="sm"
+            aria-current={section === key ? 'page' : undefined}
+            className="shrink-0 justify-start gap-2 sm:w-full"
+            onClick={() => setSection(key)}
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+            {label}
+          </Button>
+        ))}
+      </nav>
+
+      {/* min-w-0 so a wide child (tables, charts) can't push the sidebar around */}
+      <div className="min-w-0 flex-1">
+        <ActiveSection />
+      </div>
     </div>
   )
 }
