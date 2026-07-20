@@ -1,11 +1,15 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   getCustomersPage, createCustomer, updateCustomer, deleteCustomer,
   findCustomerByPhone, getBookingsByCustomer,
 } from '@/db.js'
 import { computeStats } from '@/lib/stats.js'
+import {
+  validateImageFile, uploadCustomerImage, deleteCustomerImage, formatBytes, MAX_UPLOAD_BYTES,
+} from '@/lib/customerImage.js'
 import { formatDate, formatTime } from '@/utils.js'
 import StatusBadge from '@/components/StatusBadge.jsx'
+import Avatar from '@/components/Avatar.jsx'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,11 +23,11 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  Plus, Pencil, Trash2, Search, AlertCircle, User, X,
+  Plus, Pencil, Trash2, Search, AlertCircle, User, X, ImagePlus,
   ArrowUp, ArrowDown, ChevronsUpDown, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 
-const BLANK = { name: '', phone: '', alt_phone: '', notes: '' }
+const BLANK = { name: '', phone: '', alt_phone: '', notes: '', avatar_url: '' }
 const PAGE_SIZE = 20
 
 const pkr = (n) => `PKR ${(Number(n) || 0).toLocaleString()}`
@@ -63,6 +67,13 @@ export default function Customers({ onEditBooking, refreshKey }) {
   const [form, setForm] = useState(BLANK)
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
+  // Captain photo, staged locally until the customer is saved. `imageFile` is a
+  // freshly picked File, `imagePreview` its object URL, and `imageCleared` marks
+  // "remove the existing photo" so it can be told apart from "left untouched".
+  const [imageFile, setImageFile] = useState(null)
+  const [imagePreview, setImagePreview] = useState('')
+  const [imageCleared, setImageCleared] = useState(false)
+  const fileInputRef = useRef(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleteError, setDeleteError] = useState('')
   const [selected, setSelected] = useState(null) // customer whose history is shown
@@ -105,13 +116,58 @@ export default function Customers({ onEditBooking, refreshKey }) {
       : { by: col, dir: col === 'name' ? 'asc' : 'desc' }))
   }
 
-  const openNew = () => { setForm({ ...BLANK }); setDialog('new'); setFormError('') }
+  // Drop any staged photo and release its object URL.
+  const resetImageState = () => {
+    setImageFile(null)
+    setImagePreview((url) => { if (url) URL.revokeObjectURL(url); return '' })
+    setImageCleared(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const openNew = () => { setForm({ ...BLANK }); resetImageState(); setDialog('new'); setFormError('') }
   const openEdit = (c) => {
-    setForm({ name: c.name, phone: c.phone ?? '', alt_phone: c.alt_phone ?? '', notes: c.notes ?? '' })
+    setForm({
+      name: c.name,
+      phone: c.phone ?? '',
+      alt_phone: c.alt_phone ?? '',
+      notes: c.notes ?? '',
+      avatar_url: c.avatar_url ?? '',
+    })
+    resetImageState()
     setDialog(c)
     setFormError('')
   }
-  const closeDialog = () => { setDialog(null); setFormError('') }
+  const closeDialog = () => { setDialog(null); setFormError(''); resetImageState() }
+
+  // Revoke the last preview URL if the component unmounts mid-edit.
+  useEffect(() => () => { if (imagePreview) URL.revokeObjectURL(imagePreview) }, [imagePreview])
+
+  const pickImage = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      validateImageFile(file)
+    } catch (err) {
+      setFormError(err.message)
+      e.target.value = ''
+      return
+    }
+    setFormError('')
+    setImageFile(file)
+    setImagePreview((old) => { if (old) URL.revokeObjectURL(old); return URL.createObjectURL(file) })
+    setImageCleared(false)
+  }
+
+  const clearImage = () => {
+    setImageFile(null)
+    setImagePreview((url) => { if (url) URL.revokeObjectURL(url); return '' })
+    setImageCleared(true)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // What the dialog should show right now: a just-picked file wins, then the
+  // saved photo unless it's been cleared.
+  const shownAvatar = imagePreview || (imageCleared ? '' : form.avatar_url)
 
   const f = (key) => (e) => setForm((prev) => ({ ...prev, [key]: e.target.value }))
 
@@ -135,10 +191,36 @@ export default function Customers({ onEditBooking, refreshKey }) {
         alt_phone: form.alt_phone.trim(),
         notes: form.notes.trim(),
       }
+      const previousAvatar = dialog === 'new' ? '' : (dialog.avatar_url ?? '')
+
       if (dialog === 'new') {
-        await createCustomer(data)
+        // Create first so the uploaded object can be keyed to a real customer
+        // id, then patch the URL back on. A failed upload leaves a perfectly
+        // valid customer behind — the photo was optional to begin with — so
+        // report it without rolling the record back.
+        const id = await createCustomer(data)
+        if (imageFile) {
+          try {
+            const url = await uploadCustomerImage(id, imageFile)
+            await updateCustomer(id, { avatar_url: url })
+          } catch (err) {
+            reload()
+            setFormError(`Customer saved, but the photo failed: ${err.message}`)
+            resetImageState()
+            return
+          }
+        }
       } else {
+        if (imageFile) {
+          data.avatar_url = await uploadCustomerImage(dialog.id, imageFile)
+        } else if (imageCleared) {
+          data.avatar_url = null
+        }
         await updateCustomer(dialog.id, data)
+        // Only once the row points somewhere else is the old object garbage.
+        if ('avatar_url' in data && previousAvatar && previousAvatar !== data.avatar_url) {
+          await deleteCustomerImage(previousAvatar)
+        }
       }
       reload()
       closeDialog()
@@ -252,13 +334,16 @@ export default function Customers({ onEditBooking, refreshKey }) {
                 rows.map((c) => (
                   <tr key={c.id} className="hover:bg-accent/40">
                     <td className="px-3 py-2.5">
-                      <button
-                        type="button"
-                        className="text-left font-medium hover:underline"
-                        onClick={() => openHistory(c)}
-                      >
-                        {c.name}
-                      </button>
+                      <div className="flex items-center gap-2.5">
+                        <Avatar name={c.name} src={c.avatar_url} className="h-8 w-8 text-xs" />
+                        <button
+                          type="button"
+                          className="text-left font-medium hover:underline"
+                          onClick={() => openHistory(c)}
+                        >
+                          {c.name}
+                        </button>
+                      </div>
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground">
                       {c.phone || <span className="italic">No phone</span>}
@@ -342,6 +427,42 @@ export default function Customers({ onEditBooking, refreshKey }) {
             )}
 
             <div className="space-y-1.5">
+              <Label>Captain photo <span className="font-normal text-muted-foreground">(optional)</span></Label>
+              <div className="flex items-center gap-4">
+                <Avatar name={form.name} src={shownAvatar} className="h-20 w-20 text-xl" />
+                <div className="space-y-1.5">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={pickImage}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <ImagePlus className="mr-1.5 h-4 w-4" />
+                      {shownAvatar ? 'Change photo' : 'Upload photo'}
+                    </Button>
+                    {shownAvatar && (
+                      <Button type="button" variant="ghost" size="sm" onClick={clearImage}>
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    JPG, PNG or WebP, up to {formatBytes(MAX_UPLOAD_BYTES)}. Without one, their
+                    initials are shown.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
               <Label htmlFor="c-name">Name <span className="text-destructive">*</span></Label>
               <Input id="c-name" value={form.name} onChange={f('name')} placeholder="e.g. Ahmed Ali" autoFocus />
             </div>
@@ -372,7 +493,7 @@ export default function Customers({ onEditBooking, refreshKey }) {
           <DialogFooter>
             <Button variant="outline" onClick={closeDialog}>Cancel</Button>
             <Button type="submit" form="customer-form" disabled={saving}>
-              {saving ? 'Saving…' : 'Save customer'}
+              {saving ? (imageFile ? 'Uploading…' : 'Saving…') : 'Save customer'}
             </Button>
           </DialogFooter>
         </DialogContent>

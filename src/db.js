@@ -307,6 +307,24 @@ export async function deleteCustomer(id) {
   if (error) throw new Error(error.message)
 }
 
+// Look up captain photos for a set of customer ids -> { [id]: avatar_url }.
+// Teams on the leaderboard and in the series modal are identified by the name
+// SNAPSHOT stored on the booking, not by a join to customers, so their photos
+// have to be fetched separately. Ids with no photo are simply absent from the
+// map and the UI falls back to initials.
+export async function getCustomerAvatars(ids) {
+  const unique = [...new Set(ids.filter(Boolean))]
+  if (unique.length === 0) return {}
+  const { data, error } = await supabase
+    .from('customers')
+    .select('id, avatar_url')
+    .in('id', unique)
+    .not('avatar_url', 'is', null)
+  // A missing photo must never take the whole board down with it.
+  if (error) { console.warn('Could not load customer photos:', error.message); return {} }
+  return Object.fromEntries((data ?? []).map(c => [c.id, c.avatar_url]))
+}
+
 export async function getBookingsByCustomer(customerId) {
   return withStatuses(
     supabase.from('bookings').select('*').is('deleted_at', null).eq('customer_id', customerId).order('date_start', { ascending: false })
@@ -389,6 +407,12 @@ export async function getLeaderboardMonth(monthKey) {
   for (const mm of matches) (matchesByBooking[mm.booking_id] ??= []).push(mm)
 
   const teams = computeLeaderboard(inMonth, matchesByBooking)
+
+  // computeLeaderboard is import-free and shared byte-for-byte with the public
+  // Edge Function, so photos are attached out here rather than inside it.
+  const avatars = await getCustomerAvatars(teams.map(t => t.customer_id))
+  for (const t of teams) t.avatar_url = avatars[t.customer_id] ?? null
+
   const stats = {
     teams: teams.length,                                     // ranked (linked) teams
     series: Object.keys(matchesByBooking).length,            // bookings that had ≥1 match
@@ -427,7 +451,7 @@ function toSeriesRow(b, matches, myId) {
   // don't. 0–0 (all drawn) reads as a draw here rather than "no result".
   const result = won > lost ? 'won' : won < lost ? 'lost' : 'draw'
 
-  return { bookingId: b.id, date: b.date_start, opponentName: oppName, result, won, lost, drawn }
+  return { bookingId: b.id, date: b.date_start, opponentId: oppId ?? null, opponentName: oppName, result, won, lost, drawn }
 }
 
 export async function getTeamSeries(customerId, { monthKey = null, page = 0, pageSize = 10 } = {}) {
@@ -475,6 +499,9 @@ export async function getTeamSeries(customerId, { monthKey = null, page = 0, pag
   const rows = bookings
     .filter(b => (byBooking[b.id] ?? []).length > 0)
     .map(b => toSeriesRow(b, byBooking[b.id], customerId))
+
+  const avatars = await getCustomerAvatars(rows.map(r => r.opponentId))
+  for (const r of rows) r.opponentAvatarUrl = avatars[r.opponentId] ?? null
 
   return { rows, total }
 }
