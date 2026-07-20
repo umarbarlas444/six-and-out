@@ -171,6 +171,134 @@ export async function reorderStatuses(orderedIds) {
   )
 }
 
+// ── Expense categories ────────────────────────────────────────────────────────
+//
+// Operator-defined lookup rows, same shape and lifecycle as statuses: hard
+// delete behind a reference guard (no deleted_at column), at most one default.
+
+export async function getExpenseCategories() {
+  const { data, error } = await supabase.from('expense_categories').select('*').order('sort_order')
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+export async function createExpenseCategory(data) {
+  const id = generateId()
+  const now = nowIso()
+  if (data.is_default) {
+    await supabase.from('expense_categories').update({ is_default: 0 }).neq('id', 'none')
+  }
+  const { error } = await supabase.from('expense_categories').insert({
+    ...data,
+    id,
+    is_default: data.is_default ? 1 : 0,
+    created_at: now,
+    updated_at: now,
+  })
+  if (error) throw new Error(error.message)
+  return id
+}
+
+export async function updateExpenseCategory(id, data) {
+  if (data.is_default) {
+    await supabase.from('expense_categories').update({ is_default: 0 }).neq('id', id)
+  }
+  const { error } = await supabase
+    .from('expense_categories')
+    .update({ ...data, is_default: data.is_default ? 1 : 0, updated_at: nowIso() })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function deleteExpenseCategory(id) {
+  // Only live expenses block the delete — a soft-deleted expense shouldn't keep
+  // a category alive forever.
+  const { count, error: cErr } = await supabase
+    .from('expenses')
+    .select('*', { count: 'exact', head: true })
+    .eq('category_id', id)
+    .is('deleted_at', null)
+  if (cErr) throw new Error(cErr.message)
+  if (count > 0) throw new Error(`Cannot delete: ${count} expense(s) use this category.`)
+  const { error } = await supabase.from('expense_categories').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function reorderExpenseCategories(orderedIds) {
+  await Promise.all(
+    orderedIds.map((id, i) => supabase.from('expense_categories').update({ sort_order: i }).eq('id', id))
+  )
+}
+
+// ── Expenses ──────────────────────────────────────────────────────────────────
+
+// Decorate each expense with its category label/colour, mirroring how
+// withStatuses() decorates bookings — PostgREST joins aren't denormalized here.
+function withCategories(expenses, categories) {
+  const cm = Object.fromEntries((categories ?? []).map(c => [c.id, c]))
+  return (expenses ?? []).map(e => {
+    const c = cm[e.category_id] ?? {}
+    return {
+      ...e,
+      category_label: c.label ?? 'Uncategorised',
+      category_color: c.color || '#6B7280',
+    }
+  })
+}
+
+// Expenses whose spent_at falls inside [start, end) — callers pass business-day
+// bounds from getBusinessDayBounds(), so this is already business-day aligned
+// and needs no client-side re-filtering.
+export async function getExpensesInRange(start, end) {
+  const [{ data, error }, categories] = await Promise.all([
+    supabase
+      .from('expenses')
+      .select('*')
+      .is('deleted_at', null)
+      .gte('spent_at', start)
+      .lt('spent_at', end)
+      .order('spent_at', { ascending: false }),
+    getExpenseCategories(),
+  ])
+  if (error) throw new Error(error.message)
+  return withCategories(data, categories)
+}
+
+export async function getExpenseById(id) {
+  const { data, error } = await supabase.from('expenses').select('*').eq('id', id).single()
+  if (error) return null
+  return data
+}
+
+export async function createExpense(data) {
+  const id = generateId()
+  const now = nowIso()
+  const { error } = await supabase.from('expenses').insert({
+    ...data,
+    id,
+    created_at: now,
+    updated_at: now,
+  })
+  if (error) throw new Error(error.message)
+  return id
+}
+
+export async function updateExpense(id, data) {
+  const { error } = await supabase
+    .from('expenses')
+    .update({ ...data, updated_at: nowIso() })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function deleteExpense(id) {
+  const { error } = await supabase
+    .from('expenses')
+    .update({ deleted_at: nowIso(), updated_at: nowIso() })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
 // ── Customers ─────────────────────────────────────────────────────────────────
 // Bookings snapshot customer_name/phone at save time and optionally link to a
 // customer row via customer_id — see CLAUDE.md for the FK + snapshot rationale.
