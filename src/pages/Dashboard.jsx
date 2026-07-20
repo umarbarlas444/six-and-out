@@ -76,7 +76,7 @@ export default function Dashboard({ onAdd, onEdit, refreshKey }) {
       {/* Page title + controls */}
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Dashboard Data</h1>
           <p className="text-sm text-muted-foreground">Overview of bookings, revenue and payments.</p>
         </div>
         <div className="flex flex-row flex-wrap items-center gap-2 sm:ml-auto">
