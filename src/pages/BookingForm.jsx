@@ -3,6 +3,7 @@ import { useApp } from '@/context/AppContext.jsx'
 import {
   createBooking, updateBooking, deleteBooking, getBookingById, searchOverlap,
   searchCustomers, findCustomerByPhone, createCustomer,
+  getMatchesByBooking, replaceBookingMatches,
 } from '@/db.js'
 import { actualToBusinessValue, businessValueToActualDate, formatTime, normalizePhone, whatsappUrl } from '@/utils.js'
 import { Button } from '@/components/ui/button'
@@ -127,7 +128,7 @@ function WhatsappIcon({ className }) {
   )
 }
 
-function CustomerSuggestInput({ id, label, required, placeholder, autoFocus, value, onChange, onPick, whatsapp }) {
+function CustomerSuggestInput({ id, label, required, placeholder, autoFocus, value, onChange, onPick, whatsapp, excludeId }) {
   const [suggestions, setSuggestions] = useState([])
   const [open, setOpen] = useState(false)
   const timerRef = useRef(null)
@@ -142,7 +143,13 @@ function CustomerSuggestInput({ id, label, required, placeholder, autoFocus, val
     if (q.length < 2) { setSuggestions([]); setOpen(false); return }
     timerRef.current = setTimeout(() => {
       searchCustomers(q)
-        .then((results) => { setSuggestions(results); setOpen(results.length > 0) })
+        // Drop the excluded customer (e.g. Team 1 the booker) so they can't be
+        // picked as the opposing team.
+        .then((results) => {
+          const filtered = excludeId ? results.filter((c) => c.id !== excludeId) : results
+          setSuggestions(filtered)
+          setOpen(filtered.length > 0)
+        })
         .catch(() => {})
     }, 200)
   }
@@ -212,6 +219,24 @@ const empty = {
   customer_name: '', phone: '', customer_id: null, date_start: '', hours: '',
   status: '', notes: '', advance_paid: '', total_amount: '',
   balls_new: '', balls_old: '', tapes: '',
+  // Team 2 (chosen later). series_winner_id holds the winning team's customer
+  // id, or null for a draw / no result yet.
+  customer_name_2: '', phone_2: '', customer_id_2: null,
+}
+
+// Which side won the series, from WIN counts only (drawn matches don't decide
+// it): more wins takes it, equal wins (and at least one decisive match) is a
+// draw, nothing decisive yet -> ''. Returns 'team1' | 'team2' | 'draw' | ''.
+function deriveSeriesResult(matches) {
+  let t1 = 0, t2 = 0
+  for (const m of matches) {
+    if (m.winner === 'team1') t1++
+    else if (m.winner === 'team2') t2++
+  }
+  if (t1 > t2) return 'team1'
+  if (t2 > t1) return 'team2'
+  if (t1 > 0) return 'draw'
+  return ''
 }
 
 export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
@@ -220,6 +245,10 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
   const [form, setForm] = useState(empty)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  // Series match list [{ winner: 'team1'|'team2'|'draw' }] in play order. The
+  // series winner is derived from these on save.
+  const [matches, setMatches] = useState([])
+  const [seriesOpen, setSeriesOpen] = useState(false)
   // Overlap check result: { hard: [...], soft: [...] }. `softAck` lets the user
   // proceed past a soft-flag warning by submitting again ("Book anyway").
   const [conflicts, setConflicts] = useState(null)
@@ -247,6 +276,25 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
           balls_new: b.balls_new || '',
           balls_old: b.balls_old || '',
           tapes: b.tapes || '',
+          customer_name_2: b.customer_name_2 ?? '',
+          phone_2: b.phone_2 ?? '',
+          customer_id_2: b.customer_id_2 ?? null,
+        })
+        getMatchesByBooking(bookingId).then((rows) => {
+          // Stored winner is a customer id (or null = draw); map back to the
+          // positional token the match toggle UI works in.
+          const loaded = rows.map((r) => ({
+            winner:
+              r.winner == null ? 'draw'
+              : r.winner === b.customer_id ? 'team1'
+              : r.winner === b.customer_id_2 ? 'team2'
+              : 'draw', // winner no longer matches either team (stale) -> treat as draw
+          }))
+          setMatches(loaded)
+          // Open the series panel automatically when there's anything in it.
+          if (b.customer_id_2 || b.customer_name_2 || b.series_winner_id || loaded.length > 0) {
+            setSeriesOpen(true)
+          }
         })
       })
     } else {
@@ -264,6 +312,37 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
 
   const field = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
   const setCount = (key) => (v) => setForm((f) => ({ ...f, [key]: v }))
+
+  // Series winner, auto-derived from the match list.
+  const t1Wins = matches.filter((m) => m.winner === 'team1').length
+  const t2Wins = matches.filter((m) => m.winner === 'team2').length
+  const drawnMatches = matches.filter((m) => m.winner === 'draw').length
+  const team1Label = form.customer_name.trim() || 'Team 1'
+  const team2Label = form.customer_name_2.trim() || 'Team 2'
+  const derivedResult = deriveSeriesResult(matches) // 'team1' | 'team2' | 'draw' | ''
+  // Human-readable series outcome for display; the winning team's customer id
+  // is computed at save time (below) so a just-linked Team 2 is reflected.
+  const seriesWinnerLabel =
+    derivedResult === 'team1' ? `${team1Label} won`
+    : derivedResult === 'team2' ? `${team2Label} won`
+    : derivedResult === 'draw' ? 'Draw'
+    : 'No result yet'
+
+  // Link a picked customer as Team 2, but refuse if it's the same customer as
+  // Team 1 — a team can't play itself.
+  const pickTeam2 = (c) => {
+    if (c.id && c.id === form.customer_id) {
+      setError('Team 2 must be a different customer from Team 1.')
+      return
+    }
+    setError('')
+    setForm((f) => ({ ...f, customer_name_2: c.name, phone_2: c.phone ?? '', customer_id_2: c.id }))
+  }
+
+  const addMatch = () => setMatches((ms) => [...ms, { winner: 'team1' }])
+  const setMatchWinner = (i, winner) =>
+    setMatches((ms) => ms.map((m, idx) => (idx === i ? { winner } : m)))
+  const removeMatch = (i) => setMatches((ms) => ms.filter((_, idx) => idx !== i))
 
   // Any change to the time span invalidates a prior overlap check.
   const clearConflicts = () => { setConflicts(null); setSoftAck(false) }
@@ -332,10 +411,45 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
         customerId = null
       }
 
+      // Team 2 resolves the same way. It's optional — only linked/created when
+      // a name was entered — and never allowed to be the same customer as
+      // Team 1.
+      let customerId2 = form.customer_id_2
+      const name2 = form.customer_name_2.trim()
+      const rawPhone2 = form.phone_2.trim()
+      const phone2 = normalizePhone(rawPhone2) || rawPhone2
+      if (name2) {
+        try {
+          if (!customerId2 && phone2) {
+            const existing2 = await findCustomerByPhone(phone2)
+            customerId2 = existing2
+              ? existing2.id
+              : await createCustomer({ name: name2, phone: phone2, alt_phone: '', notes: '' })
+          }
+        } catch {
+          customerId2 = null
+        }
+      } else {
+        customerId2 = null
+      }
+
+      if (customerId && customerId2 && customerId === customerId2) {
+        return setError('Team 1 and Team 2 must be different customers.')
+      }
+
       const data = {
         customer_name: form.customer_name.trim(),
         phone,
         customer_id: customerId,
+        customer_name_2: name2,
+        phone_2: phone2,
+        customer_id_2: customerId2,
+        // Winning team's customer id (null = draw / no result). Re-map here in
+        // case Team 2 was just created/linked above so its id now exists.
+        series_winner_id:
+          derivedResult === 'team1' ? customerId
+          : derivedResult === 'team2' ? customerId2
+          : null,
         date_start: dateStart.toISOString(),
         date_end: dateEnd.toISOString(),
         status: form.status,
@@ -346,11 +460,20 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
         balls_old: parseInt(form.balls_old, 10) || 0,
         tapes: parseInt(form.tapes, 10) || 0,
       }
+      let savedId = bookingId
       if (isEdit) {
         await updateBooking(bookingId, data)
       } else {
-        await createBooking(data)
+        savedId = await createBooking(data)
       }
+      // Persist the match list against the (now-known) booking id. Map the
+      // positional UI token to the winning team's customer id (null = draw);
+      // customerId/customerId2 are resolved above, so a just-linked Team 2 is
+      // stored correctly.
+      const matchRows = matches.map((m) => ({
+        winner: m.winner === 'team1' ? customerId : m.winner === 'team2' ? customerId2 : null,
+      }))
+      await replaceBookingMatches(savedId, matchRows)
       onSaved?.()
       onClose()
     } catch (err) {
@@ -552,6 +675,115 @@ export default function BookingForm({ bookingId, prefill, onClose, onSaved }) {
               onChange={field('notes')}
             />
           </div>
+
+          {/* Series & result — Team 2 and per-match winners. Only shown when
+              editing: a new booking just reserves the slot; the second team and
+              the match results aren't known until the series is actually played,
+              so they're filled in later by editing the booking. */}
+          {isEdit && (
+          <>
+          <Separator />
+
+          <div className="space-y-3">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between text-left"
+              onClick={() => setSeriesOpen((o) => !o)}
+            >
+              <span className="text-sm font-medium">Series &amp; result</span>
+              <ChevronDown className={`h-4 w-4 opacity-50 transition-transform ${seriesOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {seriesOpen && (
+              <div className="space-y-4">
+                {/* Team 2 */}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <CustomerSuggestInput
+                    id="customer_name_2"
+                    label="Team 2 name"
+                    placeholder="e.g. Bilal's XI"
+                    value={form.customer_name_2}
+                    excludeId={form.customer_id}
+                    onChange={(v) => setForm((f) => ({ ...f, customer_name_2: v, customer_id_2: null }))}
+                    onPick={pickTeam2}
+                  />
+                  <CustomerSuggestInput
+                    id="phone_2"
+                    label="Team 2 WhatsApp number"
+                    placeholder="0300 0000000"
+                    value={form.phone_2}
+                    whatsapp
+                    excludeId={form.customer_id}
+                    onChange={(v) => setForm((f) => ({ ...f, phone_2: v, customer_id_2: null }))}
+                    onPick={pickTeam2}
+                  />
+                </div>
+
+                {/* Matches */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Matches</Label>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {team1Label} {t1Wins} – {t2Wins} {team2Label}
+                      {drawnMatches > 0 && `, ${drawnMatches} drawn`}
+                    </span>
+                  </div>
+
+                  {matches.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No matches recorded yet.</p>
+                  )}
+
+                  <ul className="space-y-2">
+                    {matches.map((m, i) => (
+                      <li key={i} className="flex items-center gap-2">
+                        <span className="w-6 shrink-0 text-xs text-muted-foreground tabular-nums">#{i + 1}</span>
+                        <div className="flex flex-1 flex-wrap gap-1">
+                          {[
+                            { key: 'team1', label: team1Label },
+                            { key: 'draw', label: 'Draw' },
+                            { key: 'team2', label: team2Label },
+                          ].map((opt) => (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              onClick={() => setMatchWinner(i, opt.key)}
+                              className={`flex-1 min-w-[70px] rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
+                                m.winner === opt.key
+                                  ? 'border-primary bg-primary text-primary-foreground'
+                                  : 'border-input hover:bg-accent'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeMatch(i)}
+                          aria-label={`Remove match ${i + 1}`}
+                          className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <Button type="button" variant="outline" size="sm" onClick={addMatch}>
+                    Add match
+                  </Button>
+                </div>
+
+                {/* Series result — derived from the matches above. */}
+                <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                  <span className="text-sm text-muted-foreground">Series result</span>
+                  <span className="text-sm font-semibold">{seriesWinnerLabel}</span>
+                </div>
+              </div>
+            )}
+          </div>
+          </>
+          )}
         </form>
 
         <DialogFooter className="gap-2">

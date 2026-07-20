@@ -200,3 +200,42 @@ body {
 .dark .fc-wrapper .fc-button:hover {
   background: var(--accent) !important;
 }
+
+/* ── Leaderboard animations ─────────────────────────────────────────────────
+   Orchestrated load sequence for the leaderboard: cards/rows rise in, podium
+   pedestals grow from the floor, and the champion band gets a slow single-pass
+   sheen. All disabled under prefers-reduced-motion. */
+@keyframes lb-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lb-grow {
+  from { opacity: 0; transform: scaleY(0.04); }
+  to   { opacity: 1; transform: scaleY(1); }
+}
+@keyframes lb-sweep {
+  0%       { transform: translateX(-140%) skewX(-12deg); }
+  55%,100% { transform: translateX(340%)  skewX(-12deg); }
+}
+@keyframes lb-pop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  70%  { transform: scale(1.12); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.lb-rise     { animation: lb-rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.lb-pedestal { transform-origin: bottom; animation: lb-grow 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.lb-pop      { animation: lb-pop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.4) both; }
+
+.lb-sheen { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.lb-sheen::before {
+  content: '';
+  position: absolute; top: 0; bottom: 0; left: 0; width: 22%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  animation: lb-sweep 5.5s ease-in-out 0.6s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lb-rise, .lb-pedestal, .lb-pop { animation: none; opacity: 1; transform: none; }
+  .lb-sheen::before { display: none; }
+}
